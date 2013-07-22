@@ -1,0 +1,23 @@
+{
+    "name": "AIR",
+    "description": "Tokyo Air Quality",
+    "version": "0.0.1",
+    "author": {
+        "name": "Cameron Beccario",
+        "email": "cambecc@nullschool.net"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/cambecc/air"
+    },
+    "engine": "node >= 0.10.12",
+    "dependencies": {
+        "htmlparser": "1.7.6",
+        "iconv": "2.0.6",
+        "pg": "2.1.0",
+        "underscore": "1.5.1",
+        "when": "2.2.1"
+    },
+    "devDependencies": {
+    }
+}
