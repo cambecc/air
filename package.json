@@ -12,6 +12,7 @@
     },
     "engine": "node >= 0.10.12",
     "dependencies": {
+        "express": "3.3.4",
         "htmlparser": "1.7.6",
         "iconv": "2.0.6",
         "pg": "2.1.0",
@@ -19,5 +20,6 @@
         "when": "2.2.1"
     },
     "devDependencies": {
+        "nodeunit": "nodeunit-0.8.1"
     }
 }

@@ -2,12 +2,19 @@
 
 var util = require('util');
 var _ = require('underscore');
+var tool = require('./tool');
 var when = require('when');
 var pg = require('pg');
-var connectionString = _.format('postgres://postgres:{0}@localhost:5432/air', process.argv[2]);
+var connectionString = tool.format('postgres://postgres:{0}@localhost:5432/air', process.argv[2]);
+
+var labels = ['year', 'month', 'day', 'hour', 'minute', 'second'];
 
 function nameQuote(s) {
     return '"' + s + '"';
+}
+
+function valueQuote(s) {
+    return "'" + s + "'";
 }
 
 function cast(value, type) {
@@ -101,6 +108,66 @@ exports.upsert = function upsert(tableSpec, row) {
     return { sql: stmt, args: values };
 }
 
+function buildDateConstraint(constraints) {
+    var parts = constraints.parts;
+
+    if (constraints.current) {
+        var condition = '(SELECT MAX("date") FROM "samples")';
+        if (parts.length > 0) {
+            // "date" = ((select max(date) from samples) + INTERVAL '-1 day -3 hour') order by date
+            condition = tool.format('({0} + INTERVAL \'{1}\')',
+                condition,
+                parts.map(function(item, i) {
+                    return item + ' ' + labels[i];
+                }).join(' '));
+        }
+        return '"date" = ' + condition;
+    }
+    var str = tool.toISOString({year: parts[0], month: parts[1], day: parts[2], hour: parts[3], zone: '+09:00'});
+    return tool.format(
+        '{0} <= "date" AND "date" < CAST({0} AS TIMESTAMP WITH TIME ZONE) + INTERVAL \'1 {1}\'',
+        valueQuote(str),
+        labels[parts.length - 1]);
+}
+
+function buildTypeConstraint(constraints) {
+    // UNDONE: validation sampleType and give err if not supported -- or just select nothing..
+    // which wouldn't make too much sense.
+    if (constraints.sampleType && constraints.sampleType != '') {
+        return '"' + constraints.sampleType + '" IS NOT NULL';   // is this actually needed? so what if null returned...
+    }
+    return undefined;
+}
+
+function buildStationConstraint(constraints) {
+    // UNDONE: validate stationId and give err if not supported -- or just select nothing...
+    if (_.isFinite(constraints.stationId)) {
+        return '"stationId" = ' + (constraints.stationId * 1);
+    }
+    return undefined;
+}
+
+exports.buildStatement = function(constraints) {
+    console.log(constraints);
+    var stmt = 'SELECT ';
+    if (constraints.sampleType && constraints.sampleType != 'all') {  // UNDONE: sampleType may be ''.
+        stmt += tool.format('CAST("date" AS TEXT), "stationId", "{0}" ', constraints.sampleType);  // UNDONE: protect sql
+    }
+    else {
+        stmt += '* ';
+    }
+    stmt += '\nFROM "samples" WHERE ' + buildDateConstraint(constraints);
+//    var typeConstraint = buildTypeConstraint(constraints);
+//    if (typeConstraint) {
+//        stmt += ' AND ' + typeConstraint;
+//    }
+    var stationConstraint = buildStationConstraint(constraints);
+    if (stationConstraint) {
+        stmt += ' AND ' + stationConstraint;
+    }
+    return stmt + '\nORDER BY "date" DESC, "stationId"';
+}
+
 exports.execute = function(statement) {
     var d = when.defer();
 
@@ -112,7 +179,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === 'string' ? statement : statement.sql;
         var args = typeof statement === 'string' ? null : statement.args;
 
-        console.log(sql + (args ? ':' + args : ''));
+        console.log(sql + (args ? '; ' + args : ''));
 
         client.query(sql, args, function(error, result) {
             done();
@@ -145,7 +212,7 @@ exports.executeAll = function(statements) {
             var sql = typeof statement === 'string' ? statement : statement.sql;
             var args = typeof statement === 'string' ? null : statement.args;
 
-            console.log(/*sql + */(args ? ':' + args : ''));
+            console.log(/*sql + */(args ? '; ' + args : ''));
 
             client.query(sql, args, function(error, result) {
                 if (index == last || error) {

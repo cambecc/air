@@ -42,3 +42,37 @@ exports.fetch = function(options) {
     });
     return d.promise;
 }
+
+exports.tablesOf = function(dom) {
+    return htmlparser.DomUtils.getElements({ tag_type: 'tag', tag_name: 'table' }, dom);
+}
+
+exports.rowsOf = function(dom) {
+    return htmlparser.DomUtils.getElements({ tag_type: 'tag', tag_name: 'tr' }, dom);
+}; var rowsOf = exports.rowsOf;
+
+exports.textsOf = function(dom) {
+    return htmlparser.DomUtils.getElements({ tag_type: 'text' }, dom);
+}; var textsOf = exports.textsOf;
+
+exports.extract = function(table) {
+    var rowElements = rowsOf(table);
+    return rowElements.map(function(rowElement) {
+        var textElements = textsOf(rowElement);
+        return textElements.map(function(textElement) {
+            var value = textElement.data;
+            return value.trim();
+        });
+    });
+}
+
+exports.matchElements = function(regex, dom) {
+    var found = htmlparser.DomUtils.getElements(
+        { tag_type: 'text', tag_contains: function(s) { return s.search(regex) > -1; } },
+        dom);
+    return found ? found.map(function(tag) { return tag.data.match(regex); }) : null;
+}
+
+exports.getElementsByTagName = function(name, dom) {
+    return htmlparser.DomUtils.getElementsByTagName(name, dom);
+}
