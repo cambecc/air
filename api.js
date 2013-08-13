@@ -8,6 +8,12 @@ var _ = require('underscore');
 var tool = require('./tool');
 
 var app = express();
+var samplesTableSpec;
+
+exports.initialize = function(samplesTable) {
+    samplesTableSpec = samplesTable;
+    return this;
+}
 
 app.get('/samples', function(request, response) {
     response.send('TODO: usage');
@@ -42,24 +48,24 @@ app.get('/samples/*', function(request, response) {
     //     samples/current/0/-1/0/0/temp    - all temps for this exact moment one month ago
 
     var next;
-    var result = { current: false, parts: [], sampleType: null, stationId: null, error: null };
+    var result = {date: {current: false, parts: [], zone: '+09:00'}, sampleType: null, stationId: null, error: null};
 
     function parseSampleTypePath() {
-        result.sampleType = next;
-        result.stationId = args.shift();
-        return db.buildStatement(result);
+        result.sampleType = next;  // UNDONE: sample type validation
+        result.stationId = args.shift();  // UNDONE: stationId validation
+        return db.selectSamples(samplesTableSpec, result);
     }
 
     function parseDatePath() {
         do {
-            result.parts.push(next * 1);  // UNDONE: actual int validation
+            result.date.parts.push(next * 1);  // UNDONE: actual int validation
             next = args.shift();
         } while (_.isFinite(next));
         return parseSampleTypePath();
     }
 
     function parseCurrentPath() {
-        result.current = true;  // next == 'current';
+        result.date.current = true;  // next == 'current';
         next = args.shift();
         if (_.isFinite(next)) {
             return parseDatePath();

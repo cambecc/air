@@ -6,7 +6,6 @@ var when = require('when');
 var pipeline = require('when/pipeline');
 var db = require('./db');
 var scraper = require('./scraper');
-var api = require('./api');
 var tool = require('./tool');
 
 var stationNames = {};
@@ -46,6 +45,8 @@ var samplesTable = {
     ],
     primary: {name: 'samples_PK', columns: ['date', 'stationId']}
 };
+
+var api = require('./api').initialize(samplesTable);
 
 function extractP160DateTime(dom) {
     var parts = scraper.matchElements(/−(.*)年(.*)月(.*)日(.*)時.*−/, dom)[0];
