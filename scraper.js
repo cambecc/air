@@ -1,78 +1,108 @@
 'use strict';
 
-var util = require('util');
 var when = require('when');
 var http = require('http');
 var htmlparser = require('htmlparser');
-var shiftJIStoUTF8 = new (require('iconv')).Iconv('SHIFT_JIS', 'UTF-8//TRANSLIT//IGNORE');
 
-function parseHTML(text) {
-    var handler = new htmlparser.DefaultHandler(
-        function(error/*, dom*/) {
-            if (error) {
-                console.log('Error while parsing: ' + error);
-            }
-        },
-        { verbose: false, ignoreWhitespace: true });
-
+/**
+ * Converts the provided HTML text into a dom.
+ *
+ * @param {string} text
+ * @returns {Object} object representing the dom
+ */
+exports.parseHTML = function(text) {
+    var handler = new htmlparser.DefaultHandler(null, {verbose: false, ignoreWhitespace: true});
     new htmlparser.Parser(handler).parseComplete(text);
     return handler.dom;
+}; var parseHTML = exports.parseHTML;
+
+/**
+ * Returns all <table> tags contained in the provided dom as elements in an array.
+ *
+ * @param {Object} dom a parse tree obtained from calling the parseHTML function.
+ * @returns {Array} an array of all tables and their associated sub trees.
+ */
+exports.tablesOf = function(dom) {
+    return htmlparser.DomUtils.getElements({tag_type: 'tag', tag_name: 'table'}, dom);
 }
 
-exports.fetch = function(options) {
+/**
+ * Returns all text nodes contained in the provided dom as elements in an array.
+ *
+ * @param {Object} dom a parse tree obtained from calling the parseHTML function.
+ * @returns {Array} a flattened array of all text nodes.
+ */
+exports.textsOf = function(dom) {
+    return htmlparser.DomUtils.getElements({tag_type: 'text'}, dom);
+}; var textsOf = exports.textsOf;
+
+/**
+ * Returns all <tr> tags contained in the provided dom, presumably a tree rooted with a table node.
+ *
+ * @param {Object} dom a parse tree obtained from calling the parseHTML function.
+ * @returns {Array} an array of all rows and their associated sub trees.
+ */
+exports.rowsOf = function(dom) {
+    return htmlparser.DomUtils.getElements({tag_type: 'tag', tag_name: 'tr'}, dom);
+}; var rowsOf = exports.rowsOf;
+
+/**
+ * Given an html table comprised of rows having the <tr> tag, return a two-dimensional array of all cell values.
+ *
+ * @param {Object} table a parse tree obtained from calling the parseHTML function.
+ * @returns {Array} an array of rows, each row being an array of trimmed text values.
+ */
+exports.extract = function(table) {
+    return rowsOf(table).map(function(row) {
+        return textsOf(row).map(function(text) {
+            return text.data.trim();
+        });
+    });
+}
+
+/**
+ * Returns the match results of all text nodes in the provided dom, satisfying the specified regex, as elements
+ * in an array.
+ *
+ * @param regex a regular expression.
+ * @param {Object} dom a parse tree obtained from calling the parseHTML function.
+ * @returns {Array} an array of regex match results.
+ */
+exports.matchText = function(regex, dom) {
+    var results = [];
+    function matchForRegex(data) {
+        var match = data.match(regex);
+        return match ? results.push(match) : false;
+    }
+    htmlparser.DomUtils.getElements({tag_type: 'text', tag_contains: matchForRegex}, dom);
+    return results;
+}
+
+/**
+ * Performs an http GET and parses the HTML into a dom. The result is a promise for the dom.
+ *
+ * @param options same as those taken by the http.request method.
+ * @param [converter] a callback that takes a buffer and converts it to another format.
+ * @returns {promise} a promise for the parsed dom of the specified url
+ */
+exports.fetch = function(options, converter) {
+    converter = converter || function nop(buffer) { return buffer; };
     var d = when.defer();
-    console.log('http get: ' + util.inspect(options));
+    console.log('get: ' + options);
     http.get(options, function(response) {
         var chunks = [];
         response.on('data', function(chunk) {
             chunks.push(chunk);
         });
         response.on('end', function() {
-            console.log('end: ' + options);
-            var buffer = Buffer.concat(chunks);
-            console.log('concated: ' + options);
-            var converted = shiftJIStoUTF8.convert(buffer);
-            console.log('converted: ' + options);
+            console.log('got: ' + options);
+            var converted = converter(Buffer.concat(chunks));
             var parsed = parseHTML(converted);
-            console.log('parsed: ' + options);
+            console.log('done: ' + options);
             d.resolve(parsed);
         });
     }).on('error', function(error) {
         d.reject(error);
     });
     return d.promise;
-}
-
-exports.tablesOf = function(dom) {
-    return htmlparser.DomUtils.getElements({ tag_type: 'tag', tag_name: 'table' }, dom);
-}
-
-exports.rowsOf = function(dom) {
-    return htmlparser.DomUtils.getElements({ tag_type: 'tag', tag_name: 'tr' }, dom);
-}; var rowsOf = exports.rowsOf;
-
-exports.textsOf = function(dom) {
-    return htmlparser.DomUtils.getElements({ tag_type: 'text' }, dom);
-}; var textsOf = exports.textsOf;
-
-exports.extract = function(table) {
-    var rowElements = rowsOf(table);
-    return rowElements.map(function(rowElement) {
-        var textElements = textsOf(rowElement);
-        return textElements.map(function(textElement) {
-            var value = textElement.data;
-            return value.trim();
-        });
-    });
-}
-
-exports.matchElements = function(regex, dom) {
-    var found = htmlparser.DomUtils.getElements(
-        { tag_type: 'text', tag_contains: function(s) { return s.search(regex) > -1; } },
-        dom);
-    return found ? found.map(function(tag) { return tag.data.match(regex); }) : null;
-}
-
-exports.getElementsByTagName = function(name, dom) {
-    return htmlparser.DomUtils.getElementsByTagName(name, dom);
 }

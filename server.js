@@ -7,6 +7,7 @@ var pipeline = require('when/pipeline');
 var db = require('./db');
 var scraper = require('./scraper');
 var tool = require('./tool');
+var shiftJIStoUTF8 = new (require('iconv')).Iconv('SHIFT_JIS', 'UTF-8//TRANSLIT//IGNORE');
 
 var stationNames = {};
 
@@ -49,7 +50,7 @@ var samplesTable = {
 var api = require('./api').initialize(samplesTable);
 
 function extractP160DateTime(dom) {
-    var parts = scraper.matchElements(/−(.*)年(.*)月(.*)日(.*)時.*−/, dom)[0];
+    var parts = scraper.matchText(/−(.*)年(.*)月(.*)日(.*)時.*−/, dom)[0];
     return tool.toISOString({year: parts[1], month: parts[2], day: parts[3], hour: parts[4], zone: '+09:00'});
 }
 
@@ -165,10 +166,14 @@ function start() {
     ]);
 }
 
+function convertShiftJIStoUTF8(buffer) {
+    return shiftJIStoUTF8.convert(buffer);
+}
+
 function scrapeP160(page, date) {
     date = date ? Math.floor(date.getTime() / 1000) : '';
     var url = tool.format('http://www.kankyo.metro.tokyo.jp/cgi-bin/bunpu1/p160.cgi?no2=={0}={1}==2====2=', date, page);
-    return scraper.fetch(url);
+    return scraper.fetch(url, convertShiftJIStoUTF8);
 }
 
 function persist(statements) {
