@@ -178,8 +178,7 @@ function stationIdConstraint(constraints) {
  * Builds a sql constraint clause for sample type, if necessary.
  */
 function sampleTypeConstraint(constraints) {
-    return null;
-//    return constraints.sampleType ? quoteName(constraints.sampleType) + ' IS NOT NULL' : null;
+    return /*constraints.sampleType ? quoteName(constraints.sampleType) + ' IS NOT NULL' :*/ null;
 }
 
 /**
@@ -247,7 +246,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === 'string' ? statement : statement.sql;
         var args = typeof statement === 'string' ? [] : (statement.args || []);
 
-        console.log(sql + (args.length > 0 ? '; ' + args : ''));
+//        console.log(sql + (args.length > 0 ? '; ' + args : ''));
 
         client.query(sql, args, function(error, result) {
             done();
@@ -286,7 +285,7 @@ exports.executeAll = function(statements) {
             var sql = typeof statement === 'string' ? statement : statement.sql;
             var args = typeof statement === 'string' ? [] : (statement.args || []);
 
-            console.log(/*sql + */(args.length > 0 ? '; ' + args : ''));
+//            console.log(/*sql + */(args.length > 0 ? '; ' + args : ''));
 
             client.query(sql, args, function(error, result) {
                 if (index == last || error) {
