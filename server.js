@@ -149,19 +149,22 @@ function processP160(dom) {
     console.log('Processing P160...');
 
     var tables = scraper.tablesOf(dom);
-    var header = scraper.extract(tables[2])[0];
+    if (tables.length < 4) {
+        console.log('no data found');
+        return null;
+    }
+
+    var header = scraper.extract(tables[2])[0];  // table at index two is the header
     validateP160Header(header);
 
     var date = extractP160DateTime(dom);
-    var rows = scraper.extract(tables[3]);
+    var rows = scraper.extract(tables[3]);  // table at index three is the data
     return rows.map(function(row) { return processP160Row(row, date); });
 }
 
 function start() {
     console.log('Preparing tables...');
-    return when.join(
-        db.execute(db.createTable(stationsTable)),
-        db.execute(db.createTable(samplesTable)));
+    return persist([db.createTable(stationsTable), db.createTable(samplesTable)]);
 }
 
 function convertShiftJIStoUTF8(buffer) {
@@ -175,6 +178,9 @@ function scrapeP160(page, date) {
 }
 
 function persist(statements) {
+    if (!statements) {
+        return when.resolve(null);
+    }
     console.log('Persisting...');
     return db.executeAll(statements);
 }
@@ -186,7 +192,14 @@ function doP160Page(page, date) {
 }
 
 function doP160(date) {
-    return when.join(doP160Page(1, date), doP160Page(2, date));
+    // return a promise for a boolean which is false if data was processed, and true if data was not available
+    // i.e., true == we are done.
+    return when.reduce(
+        [doP160Page(1, date), doP160Page(2, date)],
+        function(current, value) {
+            return current && !value;
+        },
+        true);
 }
 
 function doP160Now() {
@@ -206,28 +219,31 @@ function doP160Historical() {
     console.log('Starting P160 Historical...');
     var now = new Date().getTime();
     var dates = [];
-    var hours = 5;
+    var hours = 9 * 24;  // up to nine days of historical data available, according to experiments.
     for (var i = 1; i <= hours; i++) {
         dates.push(new Date(now - (i * 60 * 60 * 1000)));
     }
 
-    function wait() {
+    function wait(x) {
         var d = when.defer();
-        setTimeout(function() { d.resolve(); }, 5000);
+        setTimeout(function() { d.resolve(x); }, 3000);
         return d.promise;
     }
 
-    return function doAnotherDate() {
-        if (dates.length > 0) {
+    return function doAnotherDate(done) {
+        if (dates.length > 0 && !done) {
             var date = dates.shift();
             console.log(tool.format('Processing {0}... (remaining: {1})', date, dates.length));
             return doP160(date).then(wait).then(doAnotherDate);
         }
-    }();
+        else {
+            console.log('Finished P160 Historical');
+        }
+    }(false);
 }
 
 start()
     .then(doP160Now)
     .then(doStationDetails)
-    .then(doP160Historical)
+//    .then(doP160Historical)
     .then(null, console.error);
