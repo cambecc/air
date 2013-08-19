@@ -6,7 +6,9 @@ var when = require('when');
 var db = require('./db');
 var scraper = require('./scraper');
 var tool = require('./tool');
-var shiftJIStoUTF8 = new (require('iconv')).Iconv('SHIFT_JIS', 'UTF-8//TRANSLIT//IGNORE');
+var stationsData = require('./station-data');
+var iconvShiftJIStoUTF8 = new (require('iconv')).Iconv('SHIFT_JIS', 'UTF-8//TRANSLIT//IGNORE');
+var shiftJIStoUTF8 = iconvShiftJIStoUTF8.convert.bind(iconvShiftJIStoUTF8);
 
 var stationNames = {};
 
@@ -14,9 +16,9 @@ var stationsTable = {
     name: 'stations',
     owner: 'postgres',
     columns: [
-        {name: 'id', type: 'INTEGER', modifier: 'NOT NULL', description: ''},
-        {name: 'name', type: 'TEXT', description: ''},
-        {name: 'address', type: 'TEXT', description: ''}
+        {name: 'id', type: 'INTEGER', modifier: 'NOT NULL', description: 'station id'},
+        {name: 'name', type: 'TEXT', description: 'station name'},
+        {name: 'address', type: 'TEXT', description: 'station location'}
     ],
     primary: {name: 'stations_PK', columns: ['id']}
 }
@@ -46,7 +48,7 @@ var samplesTable = {
     primary: {name: 'samples_PK', columns: ['date', 'stationId']}
 };
 
-var api = require('./api').initialize(samplesTable);
+var api = require('./api').initialize(stationsTable, samplesTable);
 
 function extractP160DateTime(dom) {
     var parts = scraper.matchText(/−(.*)年(.*)月(.*)日(.*)時.*−/, dom)[0];
@@ -167,14 +169,10 @@ function start() {
     return persist([db.createTable(stationsTable), db.createTable(samplesTable)]);
 }
 
-function convertShiftJIStoUTF8(buffer) {
-    return shiftJIStoUTF8.convert(buffer);
-}
-
 function scrapeP160(page, date) {
     date = date ? Math.floor(date.getTime() / 1000) : '';
     var url = tool.format('http://www.kankyo.metro.tokyo.jp/cgi-bin/bunpu1/p160.cgi?no2=={0}={1}==2====2=', date, page);
-    return scraper.fetch(url, convertShiftJIStoUTF8);
+    return scraper.fetch(url, shiftJIStoUTF8);
 }
 
 function persist(statements) {
@@ -202,24 +200,22 @@ function doP160(date) {
         true);
 }
 
-function doP160Now() {
-    return doP160(null);
-}
-
 function doStationDetails() {
     console.log('Preparing station details...');
     var statements = [];
     _.keys(stationNames).forEach(function(name) {
         statements.push(db.upsert(stationsTable, {id: stationNames[name], name: name}));
     });
+    stationsData.forEach(function(station) {
+        statements.push(db.upsert(stationsTable, {id: station[0], name: station[1], address: station[2]}));
+    });
     return persist(statements);
 }
 
-function doP160Historical() {
+function doP160Historical(hours) {
     console.log('Starting P160 Historical...');
     var now = new Date().getTime();
     var dates = [];
-    var hours = 9 * 24;  // up to nine days of historical data available, according to experiments.
     for (var i = 1; i <= hours; i++) {
         dates.push(new Date(now - (i * 60 * 60 * 1000)));
     }
@@ -243,7 +239,7 @@ function doP160Historical() {
 }
 
 start()
-    .then(doP160Now)
+    .then(doP160.bind(undefined, null))
     .then(doStationDetails)
-//    .then(doP160Historical)
+    .then(doP160Historical.bind(undefined, 0 /*9 * 24*/)) // up to nine days of historical data available
     .then(null, console.error);

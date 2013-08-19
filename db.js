@@ -230,6 +230,20 @@ exports.selectSamples = function(tableSpec, constraints) {
 }
 
 /**
+ * Returns a sql statement that selects all rows from the provided table.
+ *
+ * @param {Object} tableSpec
+ * @returns {{sql: string, args: Array}} an object {sql: x, args: y} representing a select * statement.
+ */
+exports.selectAll = function(tableSpec) {
+    var stmt = tool.format('SELECT * FROM {0}', quoteName(tableSpec.name));
+    if (tableSpec.primary) {
+        stmt += tool.format('\nORDER BY {0}', tableSpec.primary.columns.map(quoteName).join(', '));
+    }
+    return {sql: stmt, args: []};
+}
+
+/**
  * Executes the specified statement, eventually.
  *
  * @param {Object} statement an object {sql: text, args: [x, y, z]}, were args are optional.
@@ -246,7 +260,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === 'string' ? statement : statement.sql;
         var args = typeof statement === 'string' ? [] : (statement.args || []);
 
-//        console.log(sql + (args.length > 0 ? '; ' + args : ''));
+        console.log(sql + (args.length > 0 ? '; ' + args : ''));
 
         client.query(sql, args, function(error, result) {
             done();

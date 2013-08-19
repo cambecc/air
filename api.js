@@ -8,15 +8,40 @@ var _ = require('underscore');
 var tool = require('./tool');
 
 var app = express();
-var samplesTableSpec;
+var stationsTable;
+var samplesTable;
 
-exports.initialize = function(samplesTable) {
-    samplesTableSpec = samplesTable;
+exports.initialize = function(stationsTableSpec, samplesTableSpec) {
+    stationsTable = stationsTableSpec;
+    samplesTable = samplesTableSpec;
     return this;
 }
 
-app.get('/samples', function(request, response) {
-    response.send('TODO: usage');
+app.get('/about/stations', function(request, response) {
+    var schema = {};
+    stationsTable.columns.forEach(function(column) {
+        schema[column.name] = column.description;
+    });
+    response.send(schema);
+});
+
+app.get('/stations', function(request, response) {
+    var stmt = db.selectAll(stationsTable);
+    when(db.execute(stmt)).then(
+        function(result) {
+            response.send(result.rows);
+        },
+        function(error) {
+            response.send(error.message);
+        });
+});
+
+app.get('/about/samples', function(request, response) {
+    var schema = {};
+    samplesTable.columns.forEach(function(column) {
+        schema[column.name] = column.description;
+    });
+    response.send(schema);
 });
 
 app.get('/samples/*', function(request, response) {
@@ -51,14 +76,14 @@ app.get('/samples/*', function(request, response) {
     var result = {date: {current: false, parts: [], zone: '+09:00'}, sampleType: null, stationId: null, error: null};
 
     function parseSampleTypePath() {
-        result.sampleType = next;  // UNDONE: sample type validation
-        result.stationId = args.shift();  // UNDONE: stationId validation
-        return db.selectSamples(samplesTableSpec, result);
+        result.sampleType = next;  // UNDONE: sample type validation -- must be one of no, no2, temp, etc.
+        result.stationId = args.shift();  // UNDONE: stationId validation -- must be numeric
+        return db.selectSamples(samplesTable, result);
     }
 
     function parseDatePath() {
         do {
-            result.date.parts.push(next * 1);  // UNDONE: actual int validation
+            result.date.parts.push(next * 1);  // UNDONE: actual int validation -- must be numeric
             next = args.shift();
         } while (_.isFinite(next));
         return parseSampleTypePath();
