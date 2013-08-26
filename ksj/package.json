@@ -1,0 +1,22 @@
+{
+    "name": "ksj",
+    "description": "国土数値情報 Transformer",
+    "version": "0.0.1",
+    "author": {
+        "name": "Cameron Beccario",
+        "email": "cambecc@nullschool.net"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git://github.com/cambecc/air"
+    },
+    "engine": "node >= 0.10.12",
+    "dependencies": {
+        "underscore": "1.5.1",
+        "when": "2.2.1",
+        "xml2js": "0.2.8"
+    },
+    "devDependencies": {
+        "nodeunit": "nodeunit-0.8.1"
+    }
+}

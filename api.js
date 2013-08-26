@@ -17,22 +17,59 @@ exports.initialize = function(stationsTableSpec, samplesTableSpec) {
     return this;
 }
 
+function prepare(value) {
+    return value;
+//    return JSON.stringify(value, null, ' ');
+}
+
 app.get('/about/stations', function(request, response) {
     var schema = {};
     stationsTable.columns.forEach(function(column) {
         schema[column.name] = column.description;
     });
-    response.send(schema);
+    response.type('json');
+    response.json(prepare(schema));
 });
 
 app.get('/stations', function(request, response) {
     var stmt = db.selectAll(stationsTable);
     when(db.execute(stmt)).then(
         function(result) {
-            response.send(result.rows);
+            response.type('json');
+            response.json(prepare(result.rows));
         },
         function(error) {
-            response.send(error.message);
+            response.type('json');
+            response.json(prepare(error.message));
+        });
+});
+
+app.get('/stations/geo', function(request, response) {
+    var stmt = db.selectAll(stationsTable);
+    when(db.execute(stmt)).then(
+        function(result) {
+            var out = {
+                type: 'FeatureCollection',
+                features: result.rows.map(function(element) {
+                    return {
+                        type: 'Feature',
+                        properties: {name: element.id.toString()},
+                        geometry: {
+                            type: 'Point',
+                            coordinates: [
+                                parseFloat(element.longitude),
+                                parseFloat(element.latitude)
+                            ]
+                        }
+                    }
+                })
+            };
+            response.type('json');
+            response.json(prepare(out));
+        },
+        function(error) {
+            response.type('json');
+            response.json(prepare(error.message));
         });
 });
 
@@ -41,7 +78,8 @@ app.get('/about/samples', function(request, response) {
     samplesTable.columns.forEach(function(column) {
         schema[column.name] = column.description;
     });
-    response.send(schema);
+    response.type('json');
+    response.json(prepare(schema));
 });
 
 app.get('/samples/*', function(request, response) {
@@ -78,7 +116,7 @@ app.get('/samples/*', function(request, response) {
     function parseSampleTypePath() {
         result.sampleType = next;  // UNDONE: sample type validation -- must be one of no, no2, temp, etc.
         result.stationId = args.shift();  // UNDONE: stationId validation -- must be numeric
-        return db.selectSamples(samplesTable, result);
+        return db.selectSamples(samplesTable, stationsTable, result);
     }
 
     function parseDatePath() {
@@ -116,17 +154,97 @@ app.get('/samples/*', function(request, response) {
     }
 
     if (result.error) {
-        return response.send(result.error);
+        response.type('json');
+        return response.json(prepare(result.error));
     }
 
     when(db.execute(stmt)).then(
         function(result) {
-            response.send(result.rows);
+            response.type('json');
+            response.json(prepare(result.rows));
         },
         function(error) {
-            response.send(error.message);
+            response.type('json');
+            response.json(prepare(error.message));
         });
 });
+
+app.use(express.static(__dirname + '/public'));
+var server = require('http').Server(app);
+var io = require('socket.io').listen(server);
+
+// listen for incoming connections from client
+io.sockets.on('connection', function (socket) {
+
+    // start listening for coords
+    socket.on('send:coords', function (data) {
+
+        when(db.execute(db.selectAll(stationsTable))).then(
+            function(result) {
+                var coords = [];
+                result.rows.forEach(function(row) {
+                    if (row.latitude && row.longitude) {
+                        coords.push({lat: row.latitude, lng: row.longitude, acr: 0});
+                    }
+                });
+                var data = {id: 'stations', active: true, coords: coords};
+                console.log('broadcast: ' + util.inspect(data, {depth:null}));
+                socket.broadcast.emit('load:coords', data);
+            },
+            console.error);
+
+        // broadcast your coordinates to everyone except you
+        socket.broadcast.emit('load:coords', data);
+    });
+});
+
+app.get('/wind/vectors', function(request, response) {
+//    var args = request.params[0].split(/\//);
+//    console.log('/points/* ' + util.inspect(args));
+
+    var constraints = {
+        date: {current: true, parts: [], zone: '+09:00'},
+        sampleType: null,
+        stationId: null,
+        error: null
+    };
+
+    var selected = db.selectSamples(samplesTable, stationsTable, constraints);
+    if (constraints.error) {
+        response.json(constraints.error);
+        return;
+    }
+    var respond = response.json.bind(response);
+    db.execute(selected).then(buildVectors).then(respond, respond);
+});
+
+function buildVectors(selectedSamples) {
+    console.log('building vectors...');
+    var d = when.defer();
+
+    db.execute(db.selectAll(stationsTable)).then(
+        function(selectedStations) {
+            var stations = {};
+            selectedStations.rows.forEach(function(element) {
+                stations[element.id] = [element.longitude, element.latitude];
+            });
+            var samples = [];
+            selectedSamples.rows.forEach(function(sample) {
+                if (sample.wv && sample.wd) {
+                    var coords = stations[sample.stationId];
+                    if (coords) {
+                        samples.push([coords[0] * 1, coords[1] * 1, [sample.wd * 1, sample.wv * 1], sample.stationId]);
+                    }
+                }
+            });
+            d.resolve(samples);
+        },
+        function(error) {
+            d.reject(error);
+        });
+
+    return d.promise;
+}
 
 app.listen(3000);
 console.log('Listening on port 3000...');

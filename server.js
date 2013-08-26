@@ -18,7 +18,9 @@ var stationsTable = {
     columns: [
         {name: 'id', type: 'INTEGER', modifier: 'NOT NULL', description: 'station id'},
         {name: 'name', type: 'TEXT', description: 'station name'},
-        {name: 'address', type: 'TEXT', description: 'station location'}
+        {name: 'address', type: 'TEXT', description: 'station location'},
+        {name: 'latitude', type: 'NUMERIC(9, 6)', description: 'latitude'},
+        {name: 'longitude', type: 'NUMERIC(9, 6)', description: 'longitude'}
     ],
     primary: {name: 'stations_PK', columns: ['id']}
 }
@@ -207,7 +209,14 @@ function doStationDetails() {
         statements.push(db.upsert(stationsTable, {id: stationNames[name], name: name}));
     });
     stationsData.forEach(function(station) {
-        statements.push(db.upsert(stationsTable, {id: station[0], name: station[1], address: station[2]}));
+        var row = {
+            id: station[0],
+            name: station[1],
+            address: station[2],
+            latitude: station[3],
+            longitude: station[4]
+        };
+        statements.push(db.upsert(stationsTable, row));
     });
     return persist(statements);
 }
@@ -241,5 +250,9 @@ function doP160Historical(hours) {
 start()
     .then(doP160.bind(undefined, null))
     .then(doStationDetails)
-    .then(doP160Historical.bind(undefined, 0 /*9 * 24*/)) // up to nine days of historical data available
+    .then(doP160Historical.bind(undefined, 0/*9 * 24*/)) // up to nine days of historical data available
     .then(null, console.error);
+
+//setInterval(function update() {
+//    doP160(null).then(null, console.error);
+//}, 10 * 60 * 1000);  // update every ten minutes

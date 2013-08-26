@@ -191,12 +191,15 @@ function sampleTypeConstraint(constraints) {
  *                  stationId: Number id of desired station, or null for all.
  * @returns {{sql: string, args: Array}} an object {sql: x, args: y} representing a sample select statement.
  */
-exports.selectSamples = function(tableSpec, constraints) {
+exports.selectSamples = function(tableSpec, stationTableSpec, constraints) {
     console.log(constraints);
     var dateColumn = quoteName('date');
+    var idColumn = quoteName('id');
     var stationIdColumn = quoteName('stationId');
+    var longitudeColumn = quoteName('longitude');
+    var latitudeColumn = quoteName('latitude');
     var table = quoteName(tableSpec.name);
-    var stmt = 'SELECT ';
+    var stmt = tool.format('SELECT b.{0}, b.{1}, ', longitudeColumn, latitudeColumn);
 
     // First, decide which columns to select.
     if (constraints.sampleType && constraints.sampleType != 'all') {
@@ -215,7 +218,8 @@ exports.selectSamples = function(tableSpec, constraints) {
     }
 
     // Next, constrain the results by date, station id, and sample type, where necessary.
-    stmt += tool.format('\nFROM {0} WHERE {1}', table, dateConstraint(constraints.date));
+    stmt += tool.format('\nFROM {0} a INNER JOIN {1} b ON a.{2} = b.{3}', table, quoteName(stationTableSpec.name), stationIdColumn, idColumn);
+    stmt += tool.format('\nWHERE {0}', dateConstraint(constraints.date));
     var stationConstraint = stationIdConstraint(constraints);
     if (stationConstraint) {
         stmt += ' AND ' + stationConstraint;
