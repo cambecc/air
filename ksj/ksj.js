@@ -1,10 +1,10 @@
-'use strict';
+"use strict";
 
-var _ = require('underscore');
-var util = require('util');
-var when = require('when');
-var fs = require('fs');
-var xml2js = require('xml2js');
+var _ = require("underscore");
+var util = require("util");
+var when = require("when");
+var fs = require("fs");
+var xml2js = require("xml2js");
 
 /**
  * Returns a promise for a simplified JSON representation of the specified KSJ xml file.
@@ -18,21 +18,21 @@ exports.convertToJSON = function(sourceFile) {
         if (error) {
             return d.reject(error);
         }
-        console.log('Parsing...');
+        console.log("Parsing...");
         var parser = new xml2js.Parser();
         parser.parseString(data, function(error, root) {
             if (error) {
                 return d.reject(error);
             }
-            console.log('Process Pass 1...');
+            console.log("Process Pass 1...");
             var childCounts = pass1(root);
-            console.log('Process Pass 2...');
+            console.log("Process Pass 2...");
             pass2(root, childCounts);
-            console.log('Process Pass 3...');
+            console.log("Process Pass 3...");
             pass3(root);
-            console.log('Stringify...');
-            var result = JSON.stringify(root, null, ' ');
-            console.log('Converted.');
+            console.log("Stringify...");
+            var result = JSON.stringify(root, null, " ");
+            console.log("Converted.");
             d.resolve(result);
         });
     });
@@ -40,12 +40,12 @@ exports.convertToJSON = function(sourceFile) {
 }
 
 function removeNamespace(str) {
-    var i = str.indexOf(':');
+    var i = str.indexOf(":");
     return i < 0 ? str : str.substr(i + 1);
 }
 
 function removePrefix(str) {
-    var i = str.indexOf('.');
+    var i = str.indexOf(".");
     return i < 0 ? str : str.substr(i + 1);
 }
 
@@ -112,7 +112,7 @@ function pass2(root, childCounts) {
             obj[key] = visit(obj[key], key);
         });
 
-        // Move all properties from $ into owning object if they don't already exist. If afterwards $ is
+        // Move all properties from $ into owning object if they don"t already exist. If afterwards $ is
         // empty, then get rid of $.
         var $ = obj.$;
         if ($) {
@@ -164,22 +164,22 @@ function pass3(root) {
 
         var size = _.size(obj);
 
-        if (size === 2 && _.has(obj, 'dimension') && _.has(obj, 'coordinate')) {
+        if (size === 2 && _.has(obj, "dimension") && _.has(obj, "coordinate")) {
             // {"coordinate": "35.89 139.01", "dimension": "2"}  ==>  "35.89 139.01"
             return obj.coordinate;
         }
 
-        if (size === 1 && _.has(obj, 'idref')) {
+        if (size === 1 && _.has(obj, "idref")) {
             // {"idref": "n00001"}  ==>  "n00001"
             return obj.idref;
         }
 
-        if (size === 1 && _.has(obj, 'DirectPosition') && context == 'position') {
+        if (size === 1 && _.has(obj, "DirectPosition") && context == "position") {
             // "position": {"DirectPosition": "35.89 139.01"}  ==>  "position": "35.89 139.01"
             return obj.DirectPosition;
         }
 
-        if (size === 1 && _.has(obj, 'point') && context == 'indirect') {
+        if (size === 1 && _.has(obj, "point") && context == "indirect") {
             // "indirect": {"point": "n00001"}  ==>  "indirect": "n00001"
             return obj.point;
         }
@@ -206,14 +206,14 @@ exports.convertToGeoJSON = function(root) {
     var surfaces = extractSurfaces(root);
     var names = extractNames(root, surfaces);
     var result = {
-        type: 'FeatureCollection',
+        type: "FeatureCollection",
         features: buildFeatures(names, curves)
     };
-    return JSON.stringify(result, null, ' ');
+    return JSON.stringify(result, null, " ");
 }
 
 function asPoint(str) {
-    var point = str.split(' ').map(function(element) {
+    var point = str.split(" ").map(function(element) {
         return parseFloat(element);
     });
     // [long, lat] expected, but data source is [lat, long], so swap.
@@ -256,7 +256,7 @@ function extractCurves(root, pointRefs) {
 function extractCurveRefs(gmPolygon) {
     return gmPolygon.map(function(element) {
         var ref = element.boundary.GM_SurfaceBoundary.exterior.GM_Ring.generator;
-        if (ref.indexOf('_') === 0) {
+        if (ref.indexOf("_") === 0) {
             ref = ref.substr(1);
         }
         return ref;
@@ -286,8 +286,8 @@ function extractNames(root, surfaces) {
     ec01.forEach(function(element) {
         var id = element.AAC._;
         var name = scoalesce(element.CN2, element.CON);
-        if (!id && name === '所属未定') {
-            id = 'pending';
+        if (!id && name === "所属未定") {
+            id = "pending";
         }
         var feature = names[id];
         if (!feature) {
@@ -330,13 +330,13 @@ function buildGeometry(curveRefs, curves) {
         coordinates.push(multi ? [points] : points);
     });
     return multi ?
-        {type: 'MultiPolygon', coordinates: coordinates} :
-        {type: 'Polygon', coordinates: coordinates};
+        {type: "MultiPolygon", coordinates: coordinates} :
+        {type: "Polygon", coordinates: coordinates};
 }
 
 function buildFeature(n, curves) {
     return {
-        type: 'Feature',
+        type: "Feature",
         id: n.id,
         properties: {name: n.name},
         geometry: buildGeometry(n.curves, curves)

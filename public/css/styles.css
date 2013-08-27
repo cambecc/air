@@ -1,0 +1,45 @@
+/*
+.tk-fill {
+    fill: #303030;
+}
+*/
+
+.tk-inboundary {
+    fill: none;
+    stroke: #505050;
+    stroke-width: 1.5;
+    stroke-dasharray: 2, 2;
+    stroke-linejoin: round;
+}
+
+.tk-outboundary {
+    fill: #303030;
+    stroke: #808080;
+    stroke-width: 1;
+    stroke-linejoin: round;
+}
+
+body {
+    background: #202020;
+}
+
+.station {
+    fill: #4986bc;
+}
+
+#pos {
+    fill: #3aff3a;
+}
+
+#text {
+    color: #fff;
+}
+
+.surface {
+    position: absolute;
+}
+
+.hidden-surface {
+    position: absolute;
+    visibility: hidden;
+}

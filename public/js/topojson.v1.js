@@ -1,7 +1,3 @@
-/*
- * Downloaded from http://d3js.org/topojson.v1.js, 2013-08-20 16:37
- */
-
 topojson = (function() {
 
   function merge(topology, arcs) {

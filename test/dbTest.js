@@ -1,22 +1,22 @@
-'use strict';
+"use strict";
 
-var db = require('../db');
+var db = require("../db");
 
 exports.testDropTable = function(test) {
-    test.deepEqual(db.dropTable({name: 'foo'}), {sql: 'DROP TABLE IF EXISTS "foo";', args: []});
+    test.deepEqual(db.dropTable({name: "foo"}), {sql: 'DROP TABLE IF EXISTS "foo";', args: []});
     test.done();
 }
 
 exports.testCreateTable = function(test) {
     var spec = {
-        name: 'foo',
+        name: "foo",
         columns: [
-            {name: 'a', type: 'x', modifier: '1'},
-            {name: 'b', type: 'y'},
-            {name: 'c', type: 'z', modifier: '3'}],
+            {name: "a", type: "x", modifier: "1"},
+            {name: "b", type: "y"},
+            {name: "c", type: "z", modifier: "3"}],
         primary: {
-            name: 'PK',
-            columns: ['a']}};
+            name: "PK",
+            columns: ["a"]}};
 
     test.deepEqual(
         db.createTable(spec),
@@ -31,14 +31,14 @@ exports.testCreateTable = function(test) {
 
 exports.testCreateTableMultiColumnKey = function(test) {
     var spec = {
-        name: 'foo',
+        name: "foo",
         columns: [
-            {name: 'a', type: 'x', modifier: '1'},
-            {name: 'b', type: 'y'},
-            {name: 'c', type: 'z', modifier: '3'}],
+            {name: "a", type: "x", modifier: "1"},
+            {name: "b", type: "y"},
+            {name: "c", type: "z", modifier: "3"}],
         primary: {
-            name: 'PK',
-            columns: ['a', 'b']}};
+            name: "PK",
+            columns: ["a", "b"]}};
 
     test.deepEqual(
         db.createTable(spec),
@@ -53,16 +53,16 @@ exports.testCreateTableMultiColumnKey = function(test) {
 
 exports.testUpsert = function(test) {
     var spec = {
-        name: 'foo',
+        name: "foo",
         columns: [
-            {name: 'a', type: 'x'},
-            {name: 'b', type: 'y'},
-            {name: 'c', type: 'z'}],
+            {name: "a", type: "x"},
+            {name: "b", type: "y"},
+            {name: "c", type: "z"}],
         primary: {
-            name: 'PK',
-            columns: ['a', 'b']}};
+            name: "PK",
+            columns: ["a", "b"]}};
 
-    var row = {a: 5, b: 'bob', c: null};
+    var row = {a: 5, b: "bob", c: null};
 
     test.deepEqual(
         db.upsert(spec, row),
@@ -75,7 +75,7 @@ exports.testUpsert = function(test) {
                  'INSERT INTO "foo"("a", "b", "c")\nSELECT "a", "b", "c"\nFROM new_values\n' +
                  'WHERE NOT EXISTS (' +
                  'SELECT 1 FROM upsert up WHERE up."a" = new_values."a" AND up."b" = new_values."b");\n',
-            args: [5, 'bob', null]
+            args: [5, "bob", null]
         });
 
     test.done();
@@ -83,16 +83,16 @@ exports.testUpsert = function(test) {
 
 exports.testUpsertMissingColumn = function(test) {
     var spec = {
-        name: 'foo',
+        name: "foo",
         columns: [
-            {name: 'a', type: 'x'},
-            {name: 'b', type: 'y'},
-            {name: 'c', type: 'z'}],
+            {name: "a", type: "x"},
+            {name: "b", type: "y"},
+            {name: "c", type: "z"}],
         primary: {
-            name: 'PK',
-            columns: ['a', 'b']}};
+            name: "PK",
+            columns: ["a", "b"]}};
 
-    var row = {a: 5, c: 'Z'};  // b is undefined
+    var row = {a: 5, c: "Z"};  // b is undefined
 
     test.deepEqual(
         db.upsert(spec, row),
@@ -105,7 +105,7 @@ exports.testUpsertMissingColumn = function(test) {
                  'INSERT INTO "foo"("a", "b", "c")\nSELECT "a", "b", "c"\nFROM new_values\n' +
                  'WHERE NOT EXISTS (' +
                  'SELECT 1 FROM upsert up WHERE up."a" = new_values."a" AND up."b" = new_values."b");\n',
-            args: [5, null, 'Z']
+            args: [5, null, "Z"]
         });
 
     test.done();

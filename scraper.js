@@ -1,8 +1,8 @@
-'use strict';
+"use strict";
 
-var when = require('when');
-var http = require('http');
-var htmlparser = require('htmlparser');
+var when = require("when");
+var http = require("http");
+var htmlparser = require("htmlparser");
 
 /**
  * Converts the provided HTML text into a dom.
@@ -23,7 +23,7 @@ exports.parseHTML = function(text) {
  * @returns {Array} an array of all tables and their associated sub trees.
  */
 exports.tablesOf = function(dom) {
-    return htmlparser.DomUtils.getElements({tag_type: 'tag', tag_name: 'table'}, dom);
+    return htmlparser.DomUtils.getElements({tag_type: "tag", tag_name: "table"}, dom);
 }
 
 /**
@@ -33,7 +33,7 @@ exports.tablesOf = function(dom) {
  * @returns {Array} a flattened array of all text nodes.
  */
 exports.textsOf = function(dom) {
-    return htmlparser.DomUtils.getElements({tag_type: 'text'}, dom);
+    return htmlparser.DomUtils.getElements({tag_type: "text"}, dom);
 }; var textsOf = exports.textsOf;
 
 /**
@@ -43,7 +43,7 @@ exports.textsOf = function(dom) {
  * @returns {Array} an array of all rows and their associated sub trees.
  */
 exports.rowsOf = function(dom) {
-    return htmlparser.DomUtils.getElements({tag_type: 'tag', tag_name: 'tr'}, dom);
+    return htmlparser.DomUtils.getElements({tag_type: "tag", tag_name: "tr"}, dom);
 }; var rowsOf = exports.rowsOf;
 
 /**
@@ -74,7 +74,7 @@ exports.matchText = function(regex, dom) {
         var match = data.match(regex);
         return match ? results.push(match) : false;
     }
-    htmlparser.DomUtils.getElements({tag_type: 'text', tag_contains: matchForRegex}, dom);
+    htmlparser.DomUtils.getElements({tag_type: "text", tag_contains: matchForRegex}, dom);
     return results;
 }
 
@@ -88,20 +88,20 @@ exports.matchText = function(regex, dom) {
 exports.fetch = function(options, converter) {
     converter = converter || function nop(buffer) { return buffer; };
     var d = when.defer();
-    console.log('get: ' + options);
+    console.log("get: " + options);
     http.get(options, function(response) {
         var chunks = [];
-        response.on('data', function(chunk) {
+        response.on("data", function(chunk) {
             chunks.push(chunk);
         });
-        response.on('end', function() {
-            console.log('got: ' + options);
+        response.on("end", function() {
+            console.log("got: " + options);
             var converted = converter(Buffer.concat(chunks));
             var parsed = parseHTML(converted);
-            console.log('done: ' + options);
+            console.log("done: " + options);
             d.resolve(parsed);
         });
-    }).on('error', function(error) {
+    }).on("error", function(error) {
         d.reject(error);
     });
     return d.promise;

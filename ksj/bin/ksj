@@ -2,11 +2,11 @@
 
 // ./ksj -c ../../scratch/N03-110331_13.xml tk.json
 // ./ksj -t ./tk.json tk.geojson
-// topojson -o tk.topojson tk.geojson
+// topojson --bbox -o tk.topojson tk.geojson
 
-var fs = require('fs');
-var when = require('when');
-var ksj = require('../ksj');
+var fs = require("fs");
+var when = require("when");
+var ksj = require("../ksj");
 
 function write(file, data) {
     var d = when.defer();
@@ -19,12 +19,12 @@ function write(file, data) {
     return d.promise;
 }
 
-if (process.argv[2] === '-c') {
+if (process.argv[2] === "-c") {
     ksj.convertToJSON(process.argv[3]).then(write.bind(null, process.argv[4]));
 }
-else if (process.argv[2] === '-t') {
+else if (process.argv[2] === "-t") {
     when(ksj.convertToGeoJSON(require(process.argv[3]))).then(write.bind(null, process.argv[4]));
 }
 else {
-    console.log('wrong.');
+    console.log("wrong.");
 }

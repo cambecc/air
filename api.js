@@ -1,11 +1,11 @@
-'use strict';
+"use strict";
 
-var util = require('util');
-var express = require('express');
-var db = require('./db');
-var when = require('when');
-var _ = require('underscore');
-var tool = require('./tool');
+var util = require("util");
+var express = require("express");
+var db = require("./db");
+var when = require("when");
+var _ = require("underscore");
+var tool = require("./tool");
 
 var app = express();
 var stationsTable;
@@ -19,43 +19,43 @@ exports.initialize = function(stationsTableSpec, samplesTableSpec) {
 
 function prepare(value) {
     return value;
-//    return JSON.stringify(value, null, ' ');
+//    return JSON.stringify(value, null, " ");
 }
 
-app.get('/about/stations', function(request, response) {
+app.get("/about/stations", function(request, response) {
     var schema = {};
     stationsTable.columns.forEach(function(column) {
         schema[column.name] = column.description;
     });
-    response.type('json');
+    response.type("json");
     response.json(prepare(schema));
 });
 
-app.get('/stations', function(request, response) {
+app.get("/stations", function(request, response) {
     var stmt = db.selectAll(stationsTable);
     when(db.execute(stmt)).then(
         function(result) {
-            response.type('json');
+            response.type("json");
             response.json(prepare(result.rows));
         },
         function(error) {
-            response.type('json');
+            response.type("json");
             response.json(prepare(error.message));
         });
 });
 
-app.get('/stations/geo', function(request, response) {
+app.get("/stations/geo", function(request, response) {
     var stmt = db.selectAll(stationsTable);
     when(db.execute(stmt)).then(
         function(result) {
             var out = {
-                type: 'FeatureCollection',
+                type: "FeatureCollection",
                 features: result.rows.map(function(element) {
                     return {
-                        type: 'Feature',
+                        type: "Feature",
                         properties: {name: element.id.toString()},
                         geometry: {
-                            type: 'Point',
+                            type: "Point",
                             coordinates: [
                                 parseFloat(element.longitude),
                                 parseFloat(element.latitude)
@@ -64,27 +64,27 @@ app.get('/stations/geo', function(request, response) {
                     }
                 })
             };
-            response.type('json');
+            response.type("json");
             response.json(prepare(out));
         },
         function(error) {
-            response.type('json');
+            response.type("json");
             response.json(prepare(error.message));
         });
 });
 
-app.get('/about/samples', function(request, response) {
+app.get("/about/samples", function(request, response) {
     var schema = {};
     samplesTable.columns.forEach(function(column) {
         schema[column.name] = column.description;
     });
-    response.type('json');
+    response.type("json");
     response.json(prepare(schema));
 });
 
-app.get('/samples/*', function(request, response) {
+app.get("/samples/*", function(request, response) {
     var args = request.params[0].split(/\//);
-    console.log('/samples/* ' + util.inspect(args));
+    console.log("/samples/* " + util.inspect(args));
 
     // sample-type := 'all' | 'temp' | 'hum' | 'wd' | ...
     // station-id := int
@@ -111,7 +111,7 @@ app.get('/samples/*', function(request, response) {
     //     samples/current/0/-1/0/0/temp    - all temps for this exact moment one month ago
 
     var next;
-    var result = {date: {current: false, parts: [], zone: '+09:00'}, sampleType: null, stationId: null, error: null};
+    var result = {date: {current: false, parts: [], zone: "+09:00"}, sampleType: null, stationId: null, error: null};
 
     function parseSampleTypePath() {
         result.sampleType = next;  // UNDONE: sample type validation -- must be one of no, no2, temp, etc.
@@ -128,7 +128,7 @@ app.get('/samples/*', function(request, response) {
     }
 
     function parseCurrentPath() {
-        result.date.current = true;  // next == 'current';
+        result.date.current = true;  // next == "current";
         next = args.shift();
         if (_.isFinite(next)) {
             return parseDatePath();
@@ -141,110 +141,62 @@ app.get('/samples/*', function(request, response) {
         if (_.isFinite(next)) {
             return parseDatePath();
         }
-        if (next === 'current') {
+        if (next === "current") {
             return parseCurrentPath();
         }
-        result.error = 'not numeric';
+        result.error = "not numeric";
     }
 
     var stmt = parseSamplesPath();
 
     if (args.length > 0) {
-        result.error = 'too many args';
+        result.error = "too many args";
     }
 
     if (result.error) {
-        response.type('json');
+        response.type("json");
         return response.json(prepare(result.error));
     }
 
     when(db.execute(stmt)).then(
         function(result) {
-            response.type('json');
+            response.type("json");
             response.json(prepare(result.rows));
         },
         function(error) {
-            response.type('json');
+            response.type("json");
             response.json(prepare(error.message));
         });
 });
 
-app.use(express.static(__dirname + '/public'));
-var server = require('http').Server(app);
-var io = require('socket.io').listen(server);
+app.use(express.static(__dirname + "/public"));
+var server = require("http").Server(app);
 
-// listen for incoming connections from client
-io.sockets.on('connection', function (socket) {
-
-    // start listening for coords
-    socket.on('send:coords', function (data) {
-
-        when(db.execute(db.selectAll(stationsTable))).then(
-            function(result) {
-                var coords = [];
-                result.rows.forEach(function(row) {
-                    if (row.latitude && row.longitude) {
-                        coords.push({lat: row.latitude, lng: row.longitude, acr: 0});
-                    }
-                });
-                var data = {id: 'stations', active: true, coords: coords};
-                console.log('broadcast: ' + util.inspect(data, {depth:null}));
-                socket.broadcast.emit('load:coords', data);
-            },
-            console.error);
-
-        // broadcast your coordinates to everyone except you
-        socket.broadcast.emit('load:coords', data);
-    });
-});
-
-app.get('/wind/vectors', function(request, response) {
-//    var args = request.params[0].split(/\//);
-//    console.log('/points/* ' + util.inspect(args));
-
-    var constraints = {
-        date: {current: true, parts: [], zone: '+09:00'},
-        sampleType: null,
-        stationId: null,
-        error: null
-    };
-
-    var selected = db.selectSamples(samplesTable, stationsTable, constraints);
-    if (constraints.error) {
-        response.json(constraints.error);
-        return;
-    }
-    var respond = response.json.bind(response);
-    db.execute(selected).then(buildVectors).then(respond, respond);
-});
-
-function buildVectors(selectedSamples) {
-    console.log('building vectors...');
-    var d = when.defer();
-
-    db.execute(db.selectAll(stationsTable)).then(
-        function(selectedStations) {
-            var stations = {};
-            selectedStations.rows.forEach(function(element) {
-                stations[element.id] = [element.longitude, element.latitude];
-            });
-            var samples = [];
-            selectedSamples.rows.forEach(function(sample) {
-                if (sample.wv && sample.wd) {
-                    var coords = stations[sample.stationId];
-                    if (coords) {
-                        samples.push([coords[0] * 1, coords[1] * 1, [sample.wd * 1, sample.wv * 1], sample.stationId]);
-                    }
-                }
-            });
-            d.resolve(samples);
-        },
-        function(error) {
-            d.reject(error);
-        });
-
-    return d.promise;
-}
+//var io = require("socket.io").listen(server);
+//// listen for incoming connections from client
+//io.sockets.on("connection", function (socket) {
+//
+//    // start listening for coords
+//    socket.on("send:coords", function (data) {
+//
+//        when(db.execute(db.selectAll(stationsTable))).then(
+//            function(result) {
+//                var coords = [];
+//                result.rows.forEach(function(row) {
+//                    if (row.latitude && row.longitude) {
+//                        coords.push({lat: row.latitude, lng: row.longitude, acr: 0});
+//                    }
+//                });
+//                var data = {id: "stations", active: true, coords: coords};
+//                console.log("broadcast: " + util.inspect(data, {depth:null}));
+//                socket.broadcast.emit("load:coords", data);
+//            },
+//            console.error);
+//
+//        // broadcast your coordinates to everyone except you
+//        socket.broadcast.emit("load:coords", data);
+//    });
+//});
 
 app.listen(3000);
-console.log('Listening on port 3000...');
+console.log("Listening on port 3000...");
