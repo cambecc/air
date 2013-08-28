@@ -9,19 +9,9 @@ var random = Math.random;
 var round = Math.round;
 var floor = Math.floor;
 
-var width = 1200, height = 700;
-//    var width = 600, height = 350;
+var width = 1024, height = 768;
 
-var projection = d3.geo.albers()
-    .rotate([-139.3, 0])
-    .center([0, 144.20])
-    .scale(80000);
-//    var projection = d3.geo.albers()
-//        .rotate([-139.75, 0])
-//        .center([0, 144.40])
-//        .scale(40000);
-
-var path = d3.geo.path().projection(projection);
+var projection;  // ugh. global to this script, but assigned asynchronously
 
 var mapSvg = d3.select("#map-svg").attr("width", width).attr("height", height);
 var maskSvg = d3.select("#mask-svg").attr("width", width).attr("height", height);
@@ -29,14 +19,31 @@ var maskCanvas = d3.select("#mask-canvas").attr("width", width).attr("height", h
 var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height", height)[0][0];
 
 d3.json("tk.topojson", function (error, tk) {
-/*
-    var datum = topojson.feature(tk, tk.objects.tk);
-    mapSvg.selectAll(".tk")
-        .data(datum.features)
-        .enter().append("path")
-        .attr("class", "tk-fill")
-        .attr("d", path);
-*/
+
+    var bbox = tk.bbox;
+    var boundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
+    var path;
+
+    var bboxCenter = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];  // not going to work if crossing 180th meridian
+    // Create a unit projection.
+    projection = d3.geo.albers()
+        .center([0, bboxCenter[1]])
+        .rotate([-bboxCenter[0], 0])
+        .scale(1)
+        .translate([0, 0]);
+
+    // Create a path generator.
+    path = d3.geo.path().projection(projection);
+
+    // Compute the bounds of a feature of interest, then derive scale & translate.
+    var b = path.bounds(boundary);
+    var s = .95 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height);
+    var t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
+
+    // Update the projection to use computed scale & translate.
+    projection.scale(s).translate(t);
+
+    document.getElementById("detail").innerHTML += "⁂ " + bbox.join(", ");
 
     mapSvg.append("path")
         .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
@@ -51,10 +58,10 @@ d3.json("tk.topojson", function (error, tk) {
     maskSvg.append("path")
         .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
         .attr("fill", "#fff")
-//            .attr("stroke-width", "50")  // firefox does NOT like this -- incredible performance penalty
+//        .attr("stroke-width", "50")  // firefox does NOT like this -- incredible performance penalty
         .attr("stroke-width", "5")
         .attr("stroke", "#000")
-//            .attr("stroke-linejoin", "round")
+//        .attr("stroke-linejoin", "round")
         .attr("d", path);
 
     canvg(maskCanvas, document.getElementById("mask").innerHTML.trim());
@@ -114,8 +121,9 @@ d3.json("tk.topojson", function (error, tk) {
 //        var resource = "samples/2013/8/17/17"
 //        var resource = "samples/2013/8/16/15"
 //        var resource = "samples/2013/8/12/19"  // max wind at one station
-        var resource = "samples/2013/8/27/12"  // gentle breeze
-//        var resource = "samples/current";
+//        var resource = "samples/2013/8/27/12"  // gentle breeze
+//        var resource = "samples/2013/8/26/29"
+        var resource = "samples/current";
 
         interpolateVectorField(resource);
 //            interpolateScalarField(resource, "no2");
@@ -253,7 +261,7 @@ function interpolateScalarField(resource, sampleType) {
 }
 
 function displayTimestamp(isoDate) {
-    document.getElementById("timestamp").textContent += " " + isoDate;
+    document.getElementById("detail").textContent += " ⁂ " + isoDate;
 }
 
 function interpolateVectorField(resource) {
