@@ -42,8 +42,6 @@ var particles = [];
 var maxAge = 30;
 
 var mapSvg = d3.select("#map-svg").attr("width", width).attr("height", height);
-var maskSvg = d3.select("#mask-svg").attr("width", width).attr("height", height);
-var maskCanvas = d3.select("#mask-canvas").attr("width", width).attr("height", height)[0][0];
 var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height", height)[0][0];
 
 var c = fieldCanvas;
@@ -51,10 +49,60 @@ var g = c.getContext("2d");
 
 d3.select("#field-canvas").on("click", printCoord);
 
-d3.json("tk.topojson", function (error, tk) {
+function loadJson(resource) {
+    var d = when.defer();
+    d3.json(resource, function(error, result) {
+        if (error) {
+            d.reject(error);
+        }
+        else {
+            d.resolve(result);
+        }
+    })
+    return d.promise;
+}
 
+function render(width, height, appendTo) {
+    var div = document.createElement("div");
+    var svg = document.createElement("svg");
+    svg.setAttribute("width", width);
+    svg.setAttribute("height", height);
+    div.appendChild(svg);
+
+    appendTo(d3.select(svg));
+
+    var canvas = document.createElement("canvas");
+    canvas.setAttribute("width", width);
+    canvas.setAttribute("height", height);
+    canvg(canvas, div.innerHTML.trim());
+    return canvas;
+}
+
+function plotCurrentPosition(svg, projection) {
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                var p = projection([position.coords.longitude, position.coords.latitude]);
+                var x = round(p[0]);
+                var y = round(p[1]);
+                if (0 <= x && x < width && 0 <= y && y < height) {
+                    svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
+                }
+            },
+            console.error,
+            {enableHighAccuracy: true});
+    }
+}
+
+loadJson("tk-topo.json").then(doProcess, console.error);
+
+function doProcess(tk) {
+//    console.time("building meshes");
     var bbox = tk.bbox;
-    var boundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
+    var outerBoundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
+    var divisionBoundaries = topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; });
+    document.getElementById("detail").innerHTML += "⁂ " + bbox.join(", ");
+
     var path;
 
     var bboxCenter = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];  // not going to work if crossing 180th meridian
@@ -69,82 +117,52 @@ d3.json("tk.topojson", function (error, tk) {
     path = d3.geo.path().projection(projection);
 
     // Compute the bounds of a feature of interest, then derive scale & translate.
-    var b = path.bounds(boundary);
+    var b = path.bounds(outerBoundary);
     var s = .95 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height);
     var t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
 
     // Update the projection to use computed scale & translate.
     projection.scale(s).translate(t);
+//    console.timeEnd("building meshes");
 
-    document.getElementById("detail").innerHTML += "⁂ " + bbox.join(", ");
-
+//    console.time("rendering map");
     mapSvg.append("path")
-        .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
+        .datum(outerBoundary)
         .attr("class", "tk-outboundary")
         .attr("d", path);
     mapSvg.append("path")
-        .datum(topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; }))
+        .datum(divisionBoundaries)
         .attr("class", "tk-inboundary")
         .attr("d", path);
+//    console.timeEnd("rendering map");
 
-    var detachedElement = document.createElement("div");
-    var detachedSVG = document.createElement("svg");
-    detachedElement.appendChild(detachedSVG);
-    var detached = d3.select(detachedSVG).attr("width", width).attr("height", height);
+//    console.time("mask render: 1");
+    var displayMask = masker(
+        render(width, height, function(svg) {
+            svg.append("path")
+                .datum(outerBoundary)
+                .attr("fill", "#fff")
+                .attr("stroke-width", "2")
+                .attr("stroke", "#000")
+                .attr("d", path);
+        }));
+//    console.timeEnd("mask render: 1");
 
-    detached.append("path")
-        .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
-        .attr("id", "maskPath")
-        .attr("fill", "#fff")
-        .attr("stroke-width", "2")
-        .attr("stroke", "#000")
-        .attr("d", path);
+//    console.time("mask render: 2");
+    var fieldMask = masker(
+        render(width, height, function(svg) {
+            svg.append("path")
+                .datum(outerBoundary)
+                .attr("fill", "#fff")
+                .attr("stroke-width", "30")  // FF does NOT like a large number here--even canvg is slow
+                .attr("stroke", "#fff")
+                .attr("d", path);
+        }));
+//    console.timeEnd("mask render: 2");
 
-    canvg(maskCanvas, detachedElement.innerHTML.trim());
-    var displayMask = masker(maskCanvas);
+    plotCurrentPosition(mapSvg, projection);
 
-    var e;
-//    e = document.getElementById("maskPath");
-//    e.parentNode.removeChild(e);
-    var ctx = maskCanvas.getContext("2d");
-    ctx.fillStyle = "rgba(0, 0, 0, 1)";
-    ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-
-    maskSvg.append("path")
-        .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
-        .attr("id", "maskPath")
-        .attr("fill", "#fff")
-        .attr("stroke-width", "30")  // firefox does NOT like this -- incredible performance penalty
-//        .attr("stroke-width", "5")
-        .attr("stroke", "#fff")
-//        .attr("stroke-linejoin", "round")
-        .attr("d", path);
-    canvg(maskCanvas, document.getElementById("mask").innerHTML.trim());
-    var fieldMask = masker(maskCanvas);
-
-    e = document.getElementById("mask");
-    e.parentNode.removeChild(e);
-    e = document.getElementById("mask2");
-    e.parentNode.removeChild(e);
-
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(function(position) {
-                var p = projection([position.coords.longitude, position.coords.latitude]);
-                var x = round(p[0]);
-                var y = round(p[1]);
-                if (0 <= x && x < width && 0 <= y && y < height) {
-                    mapSvg.append("circle")
-                        .attr("cx", x)
-                        .attr("cy", y)
-                        .attr("r", 3)
-                        .attr("id", "pos");
-                }
-            },
-            console.error.bind(console),
-            {enableHighAccuracy: true});
-    }
-
-    d3.json("stations/geo", function(error, stations) {
+    loadJson("stations/geo").then(function(stations) {
         path.pointRadius(1);
         mapSvg.append("path")
             .datum(stations)
@@ -172,12 +190,13 @@ d3.json("tk.topojson", function (error, tk) {
 
         interpolateVectorField(resource, displayMask, fieldMask);
 //            interpolateScalarField(resource, "no2", mask);
-    });
-});
+    }).then(null, console.error);
+}
 
 function printCoord() {
-    console.log(d3.mouse(this));
-    console.log(projection.invert(d3.mouse(this)));
+    var m = d3.mouse(this);
+    console.log(JSON.stringify(m));
+    console.log(JSON.stringify(projection.invert(m)));
     done = true;
 }
 
@@ -292,7 +311,7 @@ function displayTimestamp(isoDate) {
 }
 
 function interpolateVectorField(resource, displayMask, fieldMask) {
-    d3.json(resource, function(error, samples) {
+    loadJson(resource).then(function(samples) {
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
 
         if (samples.length > 0) {
@@ -331,16 +350,17 @@ function interpolateVectorField(resource, displayMask, fieldMask) {
             }
         }
         processVectorField(field, displayMask, fieldMask);
-    });
+    }).then(null, console.error);
 
     function randomPoint(mask) {
         var x;
         var y;
-        var i = 50;
+        var i = 30;
         do {
             x = floor(random() * (width - 1));
             y = floor(random() * (height - 1));
             if (--i == 0) {  // remove this check. make better.
+                console.log("fail");
                 return [100, 100];
             }
         } while (!mask(x, y));

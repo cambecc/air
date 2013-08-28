@@ -8,6 +8,9 @@ var _ = require("underscore");
 var tool = require("./tool");
 
 var app = express();
+//app.use(express.logger());
+app.use(express.compress());
+
 var stationsTable;
 var samplesTable;
 

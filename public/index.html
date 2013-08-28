@@ -10,12 +10,6 @@
     <div id="map" style="position: absolute;">
         <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1" class="surface"></svg>
     </div>
-    <div id="mask" style="position: absolute;">
-        <svg id="mask-svg" xmlns="http://www.w3.org/2000/svg" version="1.1" class="hidden-surface"></svg>
-    </div>
-    <div id="mask2" style="position: absolute;">
-        <canvas id="mask-canvas" class="hidden-surface"></canvas>
-    </div>
     <div id="field" style="position: absolute;">
         <canvas id="field-canvas" class="surface"></canvas>
     </div>
@@ -25,6 +19,7 @@
         <h1 id="detail"></h1>
     </div>
 
+    <script src="js/when.js" charset="utf-8" type="text/javascript"></script>
     <script src="js/topojson.v1.js" charset="utf-8" type="text/javascript"></script>
     <script src="js/d3.v3.js" charset="utf-8" type="text/javascript"></script>
     <script src="js/canvg.js" charset="utf-8" type="text/javascript"></script>

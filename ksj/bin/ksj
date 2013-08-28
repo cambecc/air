@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// ./ksj -c ../../scratch/N03-110331_13.xml tk.json
-// ./ksj -t ./tk.json tk.geojson
-// topojson --bbox -o tk.topojson tk.geojson
+// ./ksj -c ../../scratch/N03-110331_13.xml tk-raw.json
+// ./ksj -t ./tk-raw.json tk-geo.json
+// topojson --bbox -o tk-topo.json tk-geo.json
 
 var fs = require("fs");
 var when = require("when");
