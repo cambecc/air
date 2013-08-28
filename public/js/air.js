@@ -3,20 +3,53 @@ var π = Math.PI;
 var sin = Math.sin;
 var cos = Math.cos;
 var atan2 = Math.atan2;
-var sqrt = Math.sqrt;
 var abs = Math.abs;
 var random = Math.random;
 var round = Math.round;
 var floor = Math.floor;
 
+/**
+ * Maps the point (x, y) to index i into an HTML5 canvas image data array (row-major layout, each
+ * pixel being four consecutive elements: [..., Ri, Gi+1, Bi+2, Ai+3, ...]).
+ */
+function pixelIndex(x, y, width) {
+    return (y * width + x) * 4;
+}
+
+/**
+ * Returns the distance between two points (x1, y1) and (x2, y2).
+ */
+function distance(x0, y0, x1, y1) {
+    var Δx = x0 - x1;
+    var Δy = y0 - y1;
+    return Math.sqrt(Δx * Δx + Δy * Δy);
+}
+
+function masker(canvas) {
+    var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    var width = canvas.width;
+    return function(x, y) {
+        var i = pixelIndex(x, y, width);
+        return 0 <= i && i < data.length && data[i] > 0;
+    }
+}
+
 var width = 1024, height = 768;
 
 var projection;  // ugh. global to this script, but assigned asynchronously
+var done = false;
+var particles = [];
+var maxAge = 30;
 
 var mapSvg = d3.select("#map-svg").attr("width", width).attr("height", height);
 var maskSvg = d3.select("#mask-svg").attr("width", width).attr("height", height);
 var maskCanvas = d3.select("#mask-canvas").attr("width", width).attr("height", height)[0][0];
 var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height", height)[0][0];
+
+var c = fieldCanvas;
+var g = c.getContext("2d");
+
+d3.select("#field-canvas").on("click", printCoord);
 
 d3.json("tk.topojson", function (error, tk) {
 
@@ -49,32 +82,50 @@ d3.json("tk.topojson", function (error, tk) {
         .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
         .attr("class", "tk-outboundary")
         .attr("d", path);
-
     mapSvg.append("path")
         .datum(topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; }))
         .attr("class", "tk-inboundary")
         .attr("d", path);
 
-    maskSvg.append("path")
+    var detachedElement = document.createElement("div");
+    var detachedSVG = document.createElement("svg");
+    detachedElement.appendChild(detachedSVG);
+    var detached = d3.select(detachedSVG).attr("width", width).attr("height", height);
+
+    detached.append("path")
         .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
+        .attr("id", "maskPath")
         .attr("fill", "#fff")
-//        .attr("stroke-width", "50")  // firefox does NOT like this -- incredible performance penalty
-        .attr("stroke-width", "5")
+        .attr("stroke-width", "2")
         .attr("stroke", "#000")
-//        .attr("stroke-linejoin", "round")
         .attr("d", path);
 
-    canvg(maskCanvas, document.getElementById("mask").innerHTML.trim());
-    var maskCanvasContext = maskCanvas.getContext("2d");
-    var maskData = maskCanvasContext.getImageData(0, 0, maskCanvas.width, maskCanvas.height).data;
+    canvg(maskCanvas, detachedElement.innerHTML.trim());
+    var displayMask = masker(maskCanvas);
 
-    for (var x = maskCanvas.width - 1; x >= 0; x -= 1) {
-        var column = fieldMask[x] = [];
-        for (var y = maskCanvas.height - 1; y >= 0; y -= 1) {
-            var i = (y * maskCanvas.width + x) * 4;
-            column[y] = maskData[i] > 0;
-        }
-    }
+    var e;
+//    e = document.getElementById("maskPath");
+//    e.parentNode.removeChild(e);
+    var ctx = maskCanvas.getContext("2d");
+    ctx.fillStyle = "rgba(0, 0, 0, 1)";
+    ctx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+
+    maskSvg.append("path")
+        .datum(topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; }))
+        .attr("id", "maskPath")
+        .attr("fill", "#fff")
+        .attr("stroke-width", "30")  // firefox does NOT like this -- incredible performance penalty
+//        .attr("stroke-width", "5")
+        .attr("stroke", "#fff")
+//        .attr("stroke-linejoin", "round")
+        .attr("d", path);
+    canvg(maskCanvas, document.getElementById("mask").innerHTML.trim());
+    var fieldMask = masker(maskCanvas);
+
+    e = document.getElementById("mask");
+    e.parentNode.removeChild(e);
+    e = document.getElementById("mask2");
+    e.parentNode.removeChild(e);
 
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(function(position) {
@@ -92,12 +143,6 @@ d3.json("tk.topojson", function (error, tk) {
             console.error.bind(console),
             {enableHighAccuracy: true});
     }
-
-    var e;
-    e = document.getElementById("mask");
-    e.parentNode.removeChild(e);
-    e = document.getElementById("mask2");
-    e.parentNode.removeChild(e);
 
     d3.json("stations/geo", function(error, stations) {
         path.pointRadius(1);
@@ -125,30 +170,15 @@ d3.json("tk.topojson", function (error, tk) {
 //        var resource = "samples/2013/8/26/29"
         var resource = "samples/current";
 
-        interpolateVectorField(resource);
-//            interpolateScalarField(resource, "no2");
+        interpolateVectorField(resource, displayMask, fieldMask);
+//            interpolateScalarField(resource, "no2", mask);
     });
 });
-
-var done = false;
-
-var fieldMask = [];
-
-d3.select("#field-canvas").on("click", printCoord);
 
 function printCoord() {
     console.log(d3.mouse(this));
     console.log(projection.invert(d3.mouse(this)));
     done = true;
-}
-
-var particles = [];
-var maxAge = 30;
-
-function distance(x1, y1, x2, y2) {
-    var xd = abs(x1 - x2);
-    var yd = abs(y1 - y2);
-    return sqrt(xd * xd + yd * yd);
 }
 
 function weight(x1, y1, x2, y2) {
@@ -179,7 +209,7 @@ function vectorAdd(a, b) {
     var cy = ay + by;
 
     var r = atan2(cy, cx);
-    var m = sqrt(cx * cx + cy * cy);
+    var m = Math.sqrt(cx * cx + cy * cy);
 
     if (!isFinite(r)) {
         r = 0;
@@ -209,10 +239,7 @@ function f(x, y, initial, data, scale, add) {
     return scale(n, 1 / d);
 }
 
-var c = fieldCanvas;
-var g = c.getContext("2d");
-
-function interpolateScalarField(resource, sampleType) {
+function interpolateScalarField(resource, sampleType, mask) {
     d3.json(resource, function(error, samples) {
         var values = [];
         samples.forEach(function(sample) {
@@ -237,10 +264,10 @@ function interpolateScalarField(resource, sampleType) {
                 }
             }
         }
-        processScalarField(field, min, max);
+        processScalarField(field, min, max, mask);
     });
 
-    function processScalarField(field, min, max) {
+    function processScalarField(field, min, max, mask) {
         var styles = [];
         for (var i = 0; i < 255; i += 1) {
             styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
@@ -249,7 +276,7 @@ function interpolateScalarField(resource, sampleType) {
 
         for (var x = 350; x < width; x+=1) {
             for (var y = 150; y < height; y+=1) {
-                if (fieldMask[x][y]) {
+                if (mask(x, y)) {
                     var v = field[x][y];
                     var style = styles[floor((v-min)/range * (styles.length-1))];
                     g.fillStyle = style;
@@ -264,7 +291,7 @@ function displayTimestamp(isoDate) {
     document.getElementById("detail").textContent += " ⁂ " + isoDate;
 }
 
-function interpolateVectorField(resource) {
+function interpolateVectorField(resource, displayMask, fieldMask) {
     d3.json(resource, function(error, samples) {
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
 
@@ -287,7 +314,7 @@ function interpolateVectorField(resource) {
         for (var x = width - 1; x >= 0; x--) {
             var column = field[x] = [];
             for (var y = height - 1; y >= 0; y--) {
-                if (fieldMask[x][y]) {
+                if (fieldMask(x, y)) {
                     var p = projection.invert([x, y]);
                     var px = p[0];
                     var py = p[1];
@@ -303,28 +330,27 @@ function interpolateVectorField(resource) {
                 }
             }
         }
-        processVectorField(field);
+        processVectorField(field, displayMask, fieldMask);
     });
 
-    function randomPoint() {
+    function randomPoint(mask) {
         var x;
         var y;
         var i = 50;
         do {
-            x = random() * (width - 1);
-            y = random() * (height - 1);
+            x = floor(random() * (width - 1));
+            y = floor(random() * (height - 1));
             if (--i == 0) {  // remove this check. make better.
-                console.log("failed");
                 return [100, 100];
             }
-        } while (!fieldMask[round(x)][round(y)]);
+        } while (!mask(x, y));
         return [x, y];
     }
 
-    function processVectorField(field) {
+    function processVectorField(field, displayMask, fieldMask) {
 
-        for (var i = 0; i < 3000; i++) {
-            var p = randomPoint();
+        for (var i = 0; i < 5000; i++) {
+            var p = randomPoint(fieldMask);
             particles.push({
                 x: p[0],
                 y: p[1],
@@ -354,7 +380,7 @@ function interpolateVectorField(resource) {
             particles.forEach(function(particle) {
                 if (particle.age > maxAge) {
                     particle.age = 0;
-                    var p = randomPoint();
+                    var p = randomPoint(fieldMask);
                     particle.x = p[0];
                     particle.y = p[1];
                 }
@@ -366,23 +392,25 @@ function interpolateVectorField(resource) {
                 var fy = round(y);
 
                 if (fx < field.length && field[fx] && fy < field[fx].length && field[fx][fy]) {
-                    if (fx < fieldMask.length && fy < fieldMask[fx].length && fieldMask[fx][fy]) {
+                    if (fieldMask(fx, fy)) {
                         var v = field[fx][fy];
-                        var xt = x + v[0] * 1;
-                        var yt = y + v[1] * 1;
+                        var xt = x + v[0];
+                        var yt = y + v[1];
 
                         var i = floor((Math.min(v[2], max) - min) / range * (styles.length - 1));
-                        var style = styles[i];
 
-//                        g.fillStyle = style; //"rgba(255, 255, 255, 1)";
-//                        g.fillRect(round(xt), round(yt), 1, 1);
+                        if (displayMask(fx, fy) && displayMask(round(xt), round(yt))) {
+                            var style = styles[i];
 
-                        g.beginPath();
-                        g.strokeStyle = style;
-                        g.moveTo(round(x), round(y));
-                        g.lineTo(round(xt), round(yt));
-                        g.stroke();
+//                            g.fillStyle = style; //"rgba(255, 255, 255, 1)";
+//                            g.fillRect(round(xt), round(yt), 1, 1);
 
+                            g.beginPath();
+                            g.strokeStyle = style;
+                            g.moveTo(round(x), round(y));
+                            g.lineTo(round(xt), round(yt));
+                            g.stroke();
+                        }
                         particle.x = xt;
                         particle.y = yt;
                     }
