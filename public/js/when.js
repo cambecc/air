@@ -11,7 +11,7 @@
  * @author John Hann
  * @version 2.2.1
  */
-when = (function(define, global) { 'use strict';
+when = function(define, global) { 'use strict';
 return define(function () {
 
 	// Public API
@@ -831,7 +831,7 @@ return define(function () {
 
 	return when;
 });
-})(
+}(
     function (factory) { return factory(); },
 	this
 );

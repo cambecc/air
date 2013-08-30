@@ -1,12 +1,6 @@
+'use strict';
 
 var π = Math.PI;
-var sin = Math.sin;
-var cos = Math.cos;
-var atan2 = Math.atan2;
-var abs = Math.abs;
-var random = Math.random;
-var round = Math.round;
-var floor = Math.floor;
 
 /**
  * Maps the point (x, y) to index i into an HTML5 canvas image data array (row-major layout, each
@@ -38,8 +32,6 @@ var width = 1024, height = 768;
 
 var projection;  // ugh. global to this script, but assigned asynchronously
 var done = false;
-var particles = [];
-var maxAge = 30;
 
 var mapSvg = d3.select("#map-svg").attr("width", width).attr("height", height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height", height)[0][0];
@@ -58,7 +50,7 @@ function loadJson(resource) {
         else {
             d.resolve(result);
         }
-    })
+    });
     return d.promise;
 }
 
@@ -83,8 +75,8 @@ function plotCurrentPosition(svg, projection) {
         navigator.geolocation.getCurrentPosition(
             function(position) {
                 var p = projection([position.coords.longitude, position.coords.latitude]);
-                var x = round(p[0]);
-                var y = round(p[1]);
+                var x = Math.round(p[0]);
+                var y = Math.round(p[1]);
                 if (0 <= x && x < width && 0 <= y && y < height) {
                     svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
                 }
@@ -170,14 +162,9 @@ function doProcess(tk) {
             .attr("d", path);
 
 //        var resource = "samples/2013/8/24/16"
-//        var resource = "samples/2013/8/22/19"
-//        var resource = "samples/2013/8/21/22"
-//        var resource = "samples/2013/8/21/16"
 //        var resource = "samples/2013/8/21/15"
 //        var resource = "samples/2013/8/20/22"
-//        var resource = "samples/2013/8/20/21"
 //        var resource = "samples/2013/8/20/20"
-//        var resource = "samples/2013/8/20/19"
 //        var resource = "samples/2013/8/20/18"
 //        var resource = "samples/2013/8/19/16"
 //        var resource = "samples/2013/8/18/17"  // strong northerly wind
@@ -186,9 +173,10 @@ function doProcess(tk) {
 //        var resource = "samples/2013/8/12/19"  // max wind at one station
 //        var resource = "samples/2013/8/27/12"  // gentle breeze
 //        var resource = "samples/2013/8/26/29"
+//        var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
         var resource = "samples/current";
 
-        interpolateVectorField(resource, displayMask, fieldMask);
+        interpolateVectorField(resource, displayMask, fieldMask).then(processVectorField);
 //            interpolateScalarField(resource, "no2", mask);
     }).then(null, console.error);
 }
@@ -219,15 +207,15 @@ function vectorScale(v, m) {
 }
 
 function vectorAdd(a, b) {
-    var ax = cos(a[0]) * a[1];
-    var ay = sin(a[0]) * a[1];
-    var bx = cos(b[0]) * b[1];
-    var by = sin(b[0]) * b[1];
+    var ax = Math.cos(a[0]) * a[1];
+    var ay = Math.sin(a[0]) * a[1];
+    var bx = Math.cos(b[0]) * b[1];
+    var by = Math.sin(b[0]) * b[1];
 
     var cx = ax + bx;
     var cy = ay + by;
 
-    var r = atan2(cy, cx);
+    var r = Math.atan2(cy, cx);
     var m = Math.sqrt(cx * cx + cy * cy);
 
     if (!isFinite(r)) {
@@ -258,59 +246,77 @@ function f(x, y, initial, data, scale, add) {
     return scale(n, 1 / d);
 }
 
-function interpolateScalarField(resource, sampleType, mask) {
-    d3.json(resource, function(error, samples) {
-        var values = [];
-        samples.forEach(function(sample) {
-            if (sample[sampleType]) {
-                values.push([sample.longitude * 1, sample.latitude * 1, sample[sampleType] * 1]);
-            }
-        });
-        var field = [];
-        var min = Number.POSITIVE_INFINITY;
-        var max = Number.NEGATIVE_INFINITY;
-        for (var x = width; x >= 350; x--) {
-            field[x] = [];
-            for (var y = height; y >= 150; y--) {
-                var p = projection.invert([x, y]);
-                var v = f(p[0], p[1], 0, values, multiply, add);
-                field[x][y] = v;
-                if (v < min) {
-                    min = v;
-                }
-                if (v > max) {
-                    max = v;
-                }
-            }
-        }
-        processScalarField(field, min, max, mask);
-    });
-
-    function processScalarField(field, min, max, mask) {
-        var styles = [];
-        for (var i = 0; i < 255; i += 1) {
-            styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
-        }
-        var range = max - min;
-
-        for (var x = 350; x < width; x+=1) {
-            for (var y = 150; y < height; y+=1) {
-                if (mask(x, y)) {
-                    var v = field[x][y];
-                    var style = styles[floor((v-min)/range * (styles.length-1))];
-                    g.fillStyle = style;
-                    g.fillRect(x, y, 1, 1);
-                }
-            }
-        }
-    }
-}
+//function interpolateScalarField(resource, sampleType, mask) {
+//    d3.json(resource, function(error, samples) {
+//        var values = [];
+//        samples.forEach(function(sample) {
+//            if (sample[sampleType]) {
+//                values.push([sample.longitude * 1, sample.latitude * 1, sample[sampleType] * 1]);
+//            }
+//        });
+//        var field = [];
+//        var min = Number.POSITIVE_INFINITY;
+//        var max = Number.NEGATIVE_INFINITY;
+//        for (var x = width; x >= 350; x--) {
+//            field[x] = [];
+//            for (var y = height; y >= 150; y--) {
+//                var p = projection.invert([x, y]);
+//                var v = f(p[0], p[1], 0, values, multiply, add);
+//                field[x][y] = v;
+//                if (v < min) {
+//                    min = v;
+//                }
+//                if (v > max) {
+//                    max = v;
+//                }
+//            }
+//        }
+//    });
+//
+//    function processScalarField(field, min, max, mask) {
+//        var styles = [];
+//        for (var i = 0; i < 255; i += 1) {
+//            styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
+//        }
+//        var range = max - min;
+//
+//        for (var x = 350; x < width; x+=1) {
+//            for (var y = 150; y < height; y+=1) {
+//                if (mask(x, y)) {
+//                    var v = field[x][y];
+//                    var style = styles[Math.floor((v-min)/range * (styles.length-1))];
+//                    g.fillStyle = style;
+//                    g.fillRect(x, y, 1, 1);
+//                }
+//            }
+//        }
+//    }
+//}
 
 function displayTimestamp(isoDate) {
     document.getElementById("detail").textContent += " ⁂ " + isoDate;
 }
 
+function randomPoint(field) {
+    var x;
+    var y;
+    var i = 30;
+    do {
+        x = Math.floor(Math.random() * (width - 1));
+        y = Math.floor(Math.random() * (height - 1));
+        if (--i == 0) {  // UNDONE: remove this check. make better.
+            console.log("fail");
+            return [Math.floor(width / 2), Math.floor(height / 2)];
+        }
+    } while (vectorAt(field, x, y) === noVector);
+    return [x, y];
+}
+
+var noVector = [0, 0, -1];
+
 function interpolateVectorField(resource, displayMask, fieldMask) {
+    var d = when.defer();
+
     loadJson(resource).then(function(samples) {
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
 
@@ -325,122 +331,140 @@ function interpolateVectorField(resource, displayMask, fieldMask) {
                 vectors.push([
                     sample.longitude * 1,
                     sample.latitude * 1,
-                    [atan2(cos(r), sin(r)), sample.wv * 1]]);
+                    [Math.atan2(Math.cos(r), Math.sin(r)), sample.wv * 1]]);
             }
         });
 
         var field = [];
-        for (var x = width - 1; x >= 0; x--) {
+        for (var x = 0; x < width; x++) {
             var column = field[x] = [];
-            for (var y = height - 1; y >= 0; y--) {
+            for (var y = 0; y < height; y++) {
+                var v = noVector;
                 if (fieldMask(x, y)) {
                     var p = projection.invert([x, y]);
                     var px = p[0];
                     var py = p[1];
                     p[0] = 0;
                     p[1] = 0;
-                    var v = f(px, py, p, vectors, vectorScale, vectorAdd);
+                    v = f(px, py, p, vectors, vectorScale, vectorAdd);
                     var r = v[0];
                     var m = v[1];
-                    v[0] = cos(r + π) * m;
-                    v[1] = -sin(r + π) * m;
-                    v[2] = m;
-                    column[y] = v;
+                    v[0] = Math.cos(r + π) * m;
+                    v[1] = -Math.sin(r + π) * m;
+                    v[2] = displayMask(x, y) ? m : -1;
                 }
+                column[y] = v;
             }
         }
-        processVectorField(field, displayMask, fieldMask);
+        d.resolve(field);
     }).then(null, console.error);
 
-    function randomPoint(mask) {
-        var x;
-        var y;
-        var i = 30;
-        do {
-            x = floor(random() * (width - 1));
-            y = floor(random() * (height - 1));
-            if (--i == 0) {  // remove this check. make better.
-                console.log("fail");
-                return [100, 100];
-            }
-        } while (!mask(x, y));
-        return [x, y];
+    return d.promise;
+}
+
+function vectorAt(field, x, y) {
+    var column = field[x];
+    if (column) {
+        var v = column[y];
+        if (v) {
+            return v;
+        }
+    }
+    return noVector;
+}
+
+function processVectorField(field) {
+    var particles = [];
+    var maxAge = 30;
+
+    for (var i = 0; i < 5000; i++) {
+        var p = randomPoint(field);
+        particles.push({
+            x: p[0],
+            y: p[1],
+            age: Math.floor(Math.random() * maxAge),
+            fx: 0,
+            fy: 0,
+            fxt: 0,
+            fyt: 0
+        });
     }
 
-    function processVectorField(field, displayMask, fieldMask) {
+    var styles = [];
+    for (var j = 75; j <= 255; j += 6) {
+        styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+    }
+    var max = 17;
+    var min = 0;
+    var range = max - min;
 
-        for (var i = 0; i < 5000; i++) {
-            var p = randomPoint(fieldMask);
-            particles.push({
-                x: p[0],
-                y: p[1],
-                age: floor(random() * maxAge)
-            });
+    draw();
+
+    function draw() {
+        var prev = g.globalCompositeOperation;
+        g.fillStyle = "rgba(0, 0, 0, 0.93)";
+        g.globalCompositeOperation = "destination-in";
+        g.fillRect(0, 0, c.width, c.height);
+        g.globalCompositeOperation = prev;
+
+        g.lineWidth = 0.75;
+        var buckets = [];
+        for (var i = 0; i < styles.length; i++) {
+            buckets[i] = [];
         }
 
-        var styles = [];
-        for (var j = 70; j <= 255; j += 1) {
-            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
-        }
-        var max = 17;
-        var min = 0;
-        var range = max - min;
-
-        draw();
-
-        function draw() {
-            var prev = g.globalCompositeOperation;
-            g.fillStyle = "rgba(0, 0, 0, 0.93)";
-            g.globalCompositeOperation = "destination-in";
-            g.fillRect(0, 0, c.width, c.height);
-            g.globalCompositeOperation = prev;
-
-            g.lineWidth = 0.75;
-
-            particles.forEach(function(particle) {
-                if (particle.age > maxAge) {
-                    particle.age = 0;
-                    var p = randomPoint(fieldMask);
-                    particle.x = p[0];
-                    particle.y = p[1];
-                }
-
-                // get vector at current location
-                var x = particle.x;
-                var y = particle.y;
-                var fx = round(x);
-                var fy = round(y);
-
-                if (fx < field.length && field[fx] && fy < field[fx].length && field[fx][fy]) {
-                    if (fieldMask(fx, fy)) {
-                        var v = field[fx][fy];
-                        var xt = x + v[0];
-                        var yt = y + v[1];
-
-                        var i = floor((Math.min(v[2], max) - min) / range * (styles.length - 1));
-
-                        if (displayMask(fx, fy) && displayMask(round(xt), round(yt))) {
-                            var style = styles[i];
-
-//                            g.fillStyle = style; //"rgba(255, 255, 255, 1)";
-//                            g.fillRect(round(xt), round(yt), 1, 1);
-
-                            g.beginPath();
-                            g.strokeStyle = style;
-                            g.moveTo(round(x), round(y));
-                            g.lineTo(round(xt), round(yt));
-                            g.stroke();
-                        }
-                        particle.x = xt;
-                        particle.y = yt;
-                    }
-                }
-                particle.age += 1;
-            });
-
-            if (!done) {
-                setTimeout(draw, 40);
+        particles.forEach(function(particle) {
+            if (particle.age > maxAge) {
+                particle.age = 0;
+                var p = randomPoint(field);
+                particle.x = p[0];
+                particle.y = p[1];
             }
+
+            // get vector at current location
+            var x = particle.x;
+            var y = particle.y;
+            var fx = Math.round(x);
+            var fy = Math.round(y);
+
+            var v = vectorAt(field, fx, fy);
+            if (v !== noVector) {
+                var xt = x + v[0];
+                var yt = y + v[1];
+                var fxt = Math.round(xt);
+                var fyt = Math.round(yt);
+                var m = v[2];
+
+                if (m >= 0 && vectorAt(field, fxt, fyt)[2] >= 0) {
+                    var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
+                    particle.fx = fx;
+                    particle.fy = fy;
+                    particle.fxt = fxt;
+                    particle.fyt = fyt;
+                    buckets[i].push(particle);
+                }
+                particle.x = xt;
+                particle.y = yt;
+            }
+            particle.age += 1;
+        });
+
+        buckets.forEach(function(bucket, i) {
+            if (bucket.length > 0) {
+                g.beginPath();
+                g.strokeStyle = styles[i];
+                bucket.forEach(function(particle) {
+//                    g.fillStyle = style; //"rgba(255, 255, 255, 1)";
+//                    g.fillRect(round(xt), round(yt), 1, 1);
+                    g.moveTo(particle.fx, particle.fy);
+                    g.lineTo(particle.fxt, particle.fyt);
+                })
+                g.stroke();
+            }
+        });
+
+        if (!done) {
+            setTimeout(draw, 35);
         }
     }
 }
