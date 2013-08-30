@@ -1,4 +1,4 @@
-'use strict';
+"use strict";
 
 var π = Math.PI;
 
@@ -19,16 +19,31 @@ function distance(x0, y0, x1, y1) {
     return Math.sqrt(Δx * Δx + Δy * Δy);
 }
 
-function masker(canvas) {
-    var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
-    var width = canvas.width;
-    return function(x, y) {
-        var i = pixelIndex(x, y, width);
-        return 0 <= i && i < data.length && data[i] > 0;
-    }
+function masker(renderTask) {
+    return renderTask.then(function(canvas) {
+        var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        var width = canvas.width;
+        return function(x, y) {
+            var i = pixelIndex(x, y, width);
+            return 0 <= i && i < data.length && data[i] > 0;
+        }
+    });
 }
 
-var width = 1024, height = 768;
+function viewPort() {
+    var div = document.getElementById("display");
+    return {width: div.clientWidth, height: div.clientHeight};
+//    var w = window;
+//    var d = document;
+//    var e = d.documentElement;
+//    var g = d.getElementsByTagName('body')[0];
+//    var x = w.innerWidth || e.clientWidth || g.clientWidth;
+//    var y = w.innerHeight || e.clientHeight || g.clientHeight;
+//    return {width: x, height: y};
+}
+
+var view = viewPort();
+var width = view.width, height = view.height;
 
 var projection;  // ugh. global to this script, but assigned asynchronously
 var done = false;
@@ -55,19 +70,27 @@ function loadJson(resource) {
 }
 
 function render(width, height, appendTo) {
-    var div = document.createElement("div");
-    var svg = document.createElement("svg");
-    svg.setAttribute("width", width);
-    svg.setAttribute("height", height);
-    div.appendChild(svg);
+    var d = when.defer();
+    setTimeout(function() {
+        console.time("rendering canvas");
 
-    appendTo(d3.select(svg));
+        var div = document.createElement("div");
+        var svg = document.createElement("svg");
+        svg.setAttribute("width", width);
+        svg.setAttribute("height", height);
+        div.appendChild(svg);
 
-    var canvas = document.createElement("canvas");
-    canvas.setAttribute("width", width);
-    canvas.setAttribute("height", height);
-    canvg(canvas, div.innerHTML.trim());
-    return canvas;
+        appendTo(d3.select(svg));
+
+        var canvas = document.createElement("canvas");
+        canvas.setAttribute("width", width);
+        canvas.setAttribute("height", height);
+        canvg(canvas, div.innerHTML.trim());
+
+        console.timeEnd("rendering canvas");
+        d.resolve(canvas);
+    }, 25);
+    return d.promise;
 }
 
 function plotCurrentPosition(svg, projection) {
@@ -81,43 +104,50 @@ function plotCurrentPosition(svg, projection) {
                     svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
                 }
             },
-            console.error,
+            console.error.bind(console),
             {enableHighAccuracy: true});
     }
 }
 
-loadJson("tk-topo.json").then(doProcess, console.error);
+loadJson("tk-topo.json").then(doProcess, console.error.bind(console));
 
-function doProcess(tk) {
-//    console.time("building meshes");
-    var bbox = tk.bbox;
-    var outerBoundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
-    var divisionBoundaries = topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; });
-    document.getElementById("detail").innerHTML += "⁂ " + bbox.join(", ");
+function createProjection(boundingBox, view) {
+    var lng0 = boundingBox[0];  // lower left longitude
+    var lat0 = boundingBox[1];  // lower left latitude
+    var lng1 = boundingBox[2];  // upper right longitude
+    var lat1 = boundingBox[3];  // upper right latitude
 
-    var path;
-
-    var bboxCenter = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2];  // not going to work if crossing 180th meridian
-    // Create a unit projection.
-    projection = d3.geo.albers()
-        .center([0, bboxCenter[1]])
-        .rotate([-bboxCenter[0], 0])
+    // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
+    // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
+    var projection = d3.geo.albers()
+        .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
+        .center([0, (lat0 + lat1) / 2])  // set the globe vertically on the bounding box's center.
         .scale(1)
         .translate([0, 0]);
 
-    // Create a path generator.
-    path = d3.geo.path().projection(projection);
+    // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
+    var p0 = projection([lng0, lat0]);
+    var p1 = projection([lng1, lat1]);
+    // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
+    var s = 1 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height);
+    // Move the center to (0, 0) in pixel space.
+    var t = [view.width / 2, view.height / 2];
 
-    // Compute the bounds of a feature of interest, then derive scale & translate.
-    var b = path.bounds(outerBoundary);
-    var s = .95 / Math.max((b[1][0] - b[0][0]) / width, (b[1][1] - b[0][1]) / height);
-    var t = [(width - s * (b[1][0] + b[0][0])) / 2, (height - s * (b[1][1] + b[0][1])) / 2];
+    return projection.scale(s).translate(t);
+}
 
-    // Update the projection to use computed scale & translate.
-    projection.scale(s).translate(t);
-//    console.timeEnd("building meshes");
+function doProcess(tk) {
+    console.time("building meshes");
 
-//    console.time("rendering map");
+    projection = createProjection(tk.bbox, view);
+
+    var path = d3.geo.path().projection(projection);
+    var outerBoundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
+    var divisionBoundaries = topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; });
+
+    console.timeEnd("building meshes");
+
+    console.time("rendering map");
     mapSvg.append("path")
         .datum(outerBoundary)
         .attr("class", "tk-outboundary")
@@ -126,10 +156,9 @@ function doProcess(tk) {
         .datum(divisionBoundaries)
         .attr("class", "tk-inboundary")
         .attr("d", path);
-//    console.timeEnd("rendering map");
+    console.timeEnd("rendering map");
 
-//    console.time("mask render: 1");
-    var displayMask = masker(
+    var displayMaskTask = masker(
         render(width, height, function(svg) {
             svg.append("path")
                 .datum(outerBoundary)
@@ -138,19 +167,16 @@ function doProcess(tk) {
                 .attr("stroke", "#000")
                 .attr("d", path);
         }));
-//    console.timeEnd("mask render: 1");
 
-//    console.time("mask render: 2");
-    var fieldMask = masker(
+    var fieldMaskTask = masker(
         render(width, height, function(svg) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
                 .attr("stroke-width", "30")  // FF does NOT like a large number here--even canvg is slow
-                .attr("stroke", "#fff")
+                .attr("stroke", "#fff")// Also, the stroke-width should scale with canvas size
                 .attr("d", path);
         }));
-//    console.timeEnd("mask render: 2");
 
     plotCurrentPosition(mapSvg, projection);
 
@@ -160,31 +186,44 @@ function doProcess(tk) {
             .datum(stations)
             .attr("class", "station")
             .attr("d", path);
+    }).then(null, console.error.bind(console));
 
-//        var resource = "samples/2013/8/24/16"
-//        var resource = "samples/2013/8/21/15"
-//        var resource = "samples/2013/8/20/22"
-//        var resource = "samples/2013/8/20/20"
-//        var resource = "samples/2013/8/20/18"
-//        var resource = "samples/2013/8/19/16"
-//        var resource = "samples/2013/8/18/17"  // strong northerly wind
-//        var resource = "samples/2013/8/17/17"
-//        var resource = "samples/2013/8/16/15"
-//        var resource = "samples/2013/8/12/19"  // max wind at one station
-//        var resource = "samples/2013/8/27/12"  // gentle breeze
-//        var resource = "samples/2013/8/26/29"
-//        var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
-        var resource = "samples/current";
+//    var resource = "samples/2013/8/24/16"
+//    var resource = "samples/2013/8/21/15"
+//    var resource = "samples/2013/8/20/22"
+//    var resource = "samples/2013/8/20/20"
+//    var resource = "samples/2013/8/20/18"
+//    var resource = "samples/2013/8/19/16"
+//    var resource = "samples/2013/8/18/17"  // strong northerly wind
+//    var resource = "samples/2013/8/17/17"
+//    var resource = "samples/2013/8/16/15"
+//    var resource = "samples/2013/8/12/19"  // max wind at one station
+//    var resource = "samples/2013/8/27/12"  // gentle breeze
+//    var resource = "samples/2013/8/26/29"
+//    var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
+    var resource = "samples/current";
 
-        interpolateVectorField(resource, displayMask, fieldMask).then(processVectorField);
-//            interpolateScalarField(resource, "no2", mask);
-    }).then(null, console.error);
+    interpolateVectorField(resource, displayMaskTask, fieldMaskTask)
+        .then(processVectorField)
+        .then(null, console.error.bind(console));
 }
 
 function printCoord() {
-    var m = d3.mouse(this);
-    console.log(JSON.stringify(m));
-    console.log(JSON.stringify(projection.invert(m)));
+    var coordinates = projection.invert(d3.mouse(this));
+    var lng = coordinates[0];
+    var lat = coordinates[1];
+    var ew = "E";
+    if (lng < 0) {
+        lng = -lng;
+        ew = "W";
+    }
+    var ns = "N";
+    if (lat < 0) {
+        lat = -lat;
+        ns = "S";
+    }
+    document.getElementById("location").textContent =
+        "⁂ " + lat.toFixed(6) + "º " + ns + ", " + lng.toFixed(6) + "º " + ew;
     done = true;
 }
 
@@ -294,7 +333,7 @@ function f(x, y, initial, data, scale, add) {
 //}
 
 function displayTimestamp(isoDate) {
-    document.getElementById("detail").textContent += " ⁂ " + isoDate;
+    document.getElementById("date").textContent = "⁂ " + isoDate;
 }
 
 function randomPoint(field) {
@@ -314,11 +353,14 @@ function randomPoint(field) {
 
 var noVector = [0, 0, -1];
 
-function interpolateVectorField(resource, displayMask, fieldMask) {
+function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
     var d = when.defer();
 
-    loadJson(resource).then(function(samples) {
+    when.all([loadJson(resource), displayMaskTask, fieldMaskTask]).then(function(results) {
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
+        var samples = results[0];
+        var displayMask = results[1];
+        var fieldMask = results[2];
 
         if (samples.length > 0) {
             displayTimestamp(samples[0].date);
@@ -357,7 +399,7 @@ function interpolateVectorField(resource, displayMask, fieldMask) {
             }
         }
         d.resolve(field);
-    }).then(null, console.error);
+    }).then(null, console.error.bind(console));
 
     return d.promise;
 }

@@ -3,20 +3,26 @@
 <head>
     <meta charset="utf-8"/>
     <title>Tokyo Air Quality</title>
-    <link rel="stylesheet" href="css/styles.css"/>
+    <meta name="title" content="Tokyo Air Quality">
+    <meta name="description" content="Tokyo Air Quality">
+    <meta name="keywords" content="tokyo, air, quality">
+    <meta name="author" content="Cameron Beccario">
+    <link rel="stylesheet" type="text/css" href="css/styles.css"/>
 </head>
 <body>
 
-    <div id="map" style="position: absolute;">
-        <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1" class="surface"></svg>
-    </div>
-    <div id="field" style="position: absolute;">
-        <canvas id="field-canvas" class="surface"></canvas>
-    </div>
-
-    <div id="text">
-        <h1>東京都風速</h1>
-        <h1 id="detail"></h1>
+    <div id="display">
+        <div id="map">
+            <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
+        </div>
+        <div id="field">
+            <canvas id="field-canvas"></canvas>
+        </div>
+        <div id="details">
+            <div id="type">東京都風速</div>
+            <div id="date">&nbsp;</div>
+            <div id="location">&nbsp;</div>
+        </div>
     </div>
 
     <script src="js/when.js" charset="utf-8" type="text/javascript"></script>

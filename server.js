@@ -9,6 +9,7 @@ var tool = require("./tool");
 var stationsData = require("./station-data");
 var iconvShiftJIStoUTF8 = new (require("iconv")).Iconv("SHIFT_JIS", "UTF-8//TRANSLIT//IGNORE");
 var shiftJIStoUTF8 = iconvShiftJIStoUTF8.convert.bind(iconvShiftJIStoUTF8);
+var scrapeURL = process.argv[3];
 
 var stationNames = {};
 
@@ -173,7 +174,7 @@ function start() {
 
 function scrapeP160(page, date) {
     date = date ? Math.floor(date.getTime() / 1000) : "";
-    var url = tool.format("http://www.kankyo.metro.tokyo.jp/cgi-bin/bunpu1/p160.cgi?no2=={0}={1}==2====2=", date, page);
+    var url = tool.format("{0}/p160.cgi?no2=={1}={1}==2====2=", scrapeURL, date, page);
     return scraper.fetch(url, shiftJIStoUTF8);
 }
 
