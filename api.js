@@ -6,19 +6,11 @@ var db = require("./db");
 var when = require("when");
 var _ = require("underscore");
 var tool = require("./tool");
+var schema = require("./schema");
 
 var app = express();
 //app.use(express.logger());
 app.use(express.compress());
-
-var stationsTable;
-var samplesTable;
-
-exports.initialize = function(stationsTableSpec, samplesTableSpec) {
-    stationsTable = stationsTableSpec;
-    samplesTable = samplesTableSpec;
-    return this;
-}
 
 function prepare(value) {
     return value;
@@ -26,16 +18,16 @@ function prepare(value) {
 }
 
 app.get("/about/stations", function(request, response) {
-    var schema = {};
-    stationsTable.columns.forEach(function(column) {
-        schema[column.name] = column.description;
+    var result = {};
+    schema.stations.columns.forEach(function(column) {
+        result[column.name] = column.description;
     });
     response.type("json");
-    response.json(prepare(schema));
+    response.json(prepare(result));
 });
 
 app.get("/stations", function(request, response) {
-    var stmt = db.selectAll(stationsTable);
+    var stmt = db.selectAll(schema.stations);
     when(db.execute(stmt)).then(
         function(result) {
             response.type("json");
@@ -48,7 +40,7 @@ app.get("/stations", function(request, response) {
 });
 
 app.get("/stations/geo", function(request, response) {
-    var stmt = db.selectAll(stationsTable);
+    var stmt = db.selectAll(schema.stations);
     when(db.execute(stmt)).then(
         function(result) {
             var out = {
@@ -77,12 +69,12 @@ app.get("/stations/geo", function(request, response) {
 });
 
 app.get("/about/samples", function(request, response) {
-    var schema = {};
-    samplesTable.columns.forEach(function(column) {
-        schema[column.name] = column.description;
+    var result = {};
+    schema.samples.columns.forEach(function(column) {
+        result[column.name] = column.description;
     });
     response.type("json");
-    response.json(prepare(schema));
+    response.json(prepare(result));
 });
 
 app.get("/samples/*", function(request, response) {
@@ -119,7 +111,7 @@ app.get("/samples/*", function(request, response) {
     function parseSampleTypePath() {
         result.sampleType = next;  // UNDONE: sample type validation -- must be one of no, no2, temp, etc.
         result.stationId = args.shift();  // UNDONE: stationId validation -- must be numeric
-        return db.selectSamples(samplesTable, stationsTable, result);
+        return db.selectSamples(schema.samples, schema.stations, result);
     }
 
     function parseDatePath() {
@@ -182,7 +174,7 @@ var server = require("http").Server(app);
 //    // start listening for coords
 //    socket.on("send:coords", function (data) {
 //
-//        when(db.execute(db.selectAll(stationsTable))).then(
+//        when(db.execute(db.selectAll(schema.stations))).then(
 //            function(result) {
 //                var coords = [];
 //                result.rows.forEach(function(row) {
