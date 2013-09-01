@@ -1,3 +1,8 @@
+@font-face {
+    font-family: mplus-2p-thin;
+    src: url("/css/mplus-2p-thin.ttf");
+}
+
 /* meyerweb.com/eric/tools/css/reset */
 html, body, div, span, applet, object, iframe,
 h1, h2, h3, h4, h5, h6, p, blockquote, pre,
@@ -15,8 +20,8 @@ time, mark, audio, video {
     margin: 0;
     padding: 0;
     border: 0;
-    font-size: 100%;
-    font: 100 16px Helvetica,arial,freesans,clean,sans-serif;
+    /*font-size: 100%;*/
+    font: 32px mplus-2p-thin,Helvetica,arial,freesans,clean,sans-serif;
     vertical-align: baseline;
 }
 
@@ -55,7 +60,7 @@ end reset
 
 .tk-outboundary {
     fill: #303030;
-    stroke: #808080;
+    stroke: #a0a0a0;
     stroke-width: 1;
     stroke-linejoin: round;
 }
@@ -81,8 +86,9 @@ body {
 }
 
 #display {
+    margin: 70px;
     position: relative;
-    height: 100vh;
+    height: 80vh;
 }
 
 #field {
@@ -93,7 +99,11 @@ body {
 
 #details {
     position: absolute;
-    bottom: 10%;
-    left: 10%;
+    bottom: 0;
+    left: 0;
     color: #fff;
+}
+
+.smallprint {
+    font-size: 14px;
 }

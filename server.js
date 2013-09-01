@@ -174,7 +174,7 @@ function start() {
 
 function scrapeP160(page, date) {
     date = date ? Math.floor(date.getTime() / 1000) : "";
-    var url = tool.format("{0}/p160.cgi?no2=={1}={1}==2====2=", scrapeURL, date, page);
+    var url = tool.format("{0}/p160.cgi?no2=={1}={2}==2====2=", scrapeURL, date, page);
     return scraper.fetch(url, shiftJIStoUTF8);
 }
 
@@ -254,6 +254,6 @@ start()
     .then(doP160Historical.bind(undefined, 0/*9 * 24*/)) // up to nine days of historical data available
     .then(null, console.error);
 
-//setInterval(function update() {
-//    doP160(null).then(null, console.error);
-//}, 10 * 60 * 1000);  // update every ten minutes
+setInterval(function update() {
+    doP160(null).then(null, console.error);
+}, 10 * 60 * 1000);  // update every ten minutes

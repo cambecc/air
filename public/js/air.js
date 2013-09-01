@@ -1,6 +1,7 @@
 "use strict";
 
 var π = Math.PI;
+var noField = false;
 
 /**
  * Maps the point (x, y) to index i into an HTML5 canvas image data array (row-major layout, each
@@ -19,7 +20,59 @@ function distance(x0, y0, x1, y1) {
     return Math.sqrt(Δx * Δx + Δy * Δy);
 }
 
+/**
+ * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
+ * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
+ *
+ * @param boundingBox an array of four values: longitude and latitude for the lower left and then upper right
+ *        points of the bounding box, respectively.
+ * @param view the view port as an object {width: Number, height: Number}
+ * @returns a d3 projection
+ */
+function createProjection(boundingBox, view) {
+    var lng0 = boundingBox[0];  // lower left longitude
+    var lat0 = boundingBox[1];  // lower left latitude
+    var lng1 = boundingBox[2];  // upper right longitude
+    var lat1 = boundingBox[3];  // upper right latitude
+
+    // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
+    // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
+    var projection = d3.geo.albers()
+        .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
+        .center([0, (lat0 + lat1) / 2])  // set the globe vertically on the bounding box's center.
+        .scale(1)
+        .translate([0, 0]);
+
+    // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
+    var p0 = projection([lng0, lat0]);
+    var p1 = projection([lng1, lat1]);
+    // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
+    var s = 0.95 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height);
+    // Move the center to (0, 0) in pixel space.
+    var t = [view.width / 2, view.height / 2];
+
+    return projection.scale(s).translate(t);
+}
+
+/**
+ * Returns a promise for a JSON resource (URL) fetched via XHR.
+ */
+function loadJson(resource) {
+    var d = when.defer();
+    d3.json(resource, function(error, result) {
+        if (error) {
+            d.reject(error);
+        }
+        else {
+            d.resolve(result);
+        }
+    });
+    return d.promise;
+}
+
+
 function masker(renderTask) {
+    if (noField) return when.resolve("no");
     return renderTask.then(function(canvas) {
         var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
         var width = canvas.width;
@@ -56,21 +109,11 @@ var g = c.getContext("2d");
 
 d3.select("#field-canvas").on("click", printCoord);
 
-function loadJson(resource) {
-    var d = when.defer();
-    d3.json(resource, function(error, result) {
-        if (error) {
-            d.reject(error);
-        }
-        else {
-            d.resolve(result);
-        }
-    });
-    return d.promise;
-}
-
 function render(width, height, appendTo) {
     var d = when.defer();
+
+    if (noField) { d.resolve("no"); return d.promise; }
+
     setTimeout(function() {
         console.time("rendering canvas");
 
@@ -110,31 +153,6 @@ function plotCurrentPosition(svg, projection) {
 }
 
 loadJson("tk-topo.json").then(doProcess, console.error.bind(console));
-
-function createProjection(boundingBox, view) {
-    var lng0 = boundingBox[0];  // lower left longitude
-    var lat0 = boundingBox[1];  // lower left latitude
-    var lng1 = boundingBox[2];  // upper right longitude
-    var lat1 = boundingBox[3];  // upper right latitude
-
-    // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
-    // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
-    var projection = d3.geo.albers()
-        .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
-        .center([0, (lat0 + lat1) / 2])  // set the globe vertically on the bounding box's center.
-        .scale(1)
-        .translate([0, 0]);
-
-    // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
-    var p0 = projection([lng0, lat0]);
-    var p1 = projection([lng1, lat1]);
-    // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
-    var s = 1 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height);
-    // Move the center to (0, 0) in pixel space.
-    var t = [view.width / 2, view.height / 2];
-
-    return projection.scale(s).translate(t);
-}
 
 function doProcess(tk) {
     console.time("building meshes");
@@ -193,15 +211,15 @@ function doProcess(tk) {
 //    var resource = "samples/2013/8/20/22"
 //    var resource = "samples/2013/8/20/20"
 //    var resource = "samples/2013/8/20/18"
-//    var resource = "samples/2013/8/19/16"
 //    var resource = "samples/2013/8/18/17"  // strong northerly wind
-//    var resource = "samples/2013/8/17/17"
 //    var resource = "samples/2013/8/16/15"
 //    var resource = "samples/2013/8/12/19"  // max wind at one station
 //    var resource = "samples/2013/8/27/12"  // gentle breeze
 //    var resource = "samples/2013/8/26/29"
 //    var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
-    var resource = "samples/current";
+//    var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
+    var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+//    var resource = "samples/current";
 
     interpolateVectorField(resource, displayMaskTask, fieldMaskTask)
         .then(processVectorField)
@@ -285,53 +303,6 @@ function f(x, y, initial, data, scale, add) {
     return scale(n, 1 / d);
 }
 
-//function interpolateScalarField(resource, sampleType, mask) {
-//    d3.json(resource, function(error, samples) {
-//        var values = [];
-//        samples.forEach(function(sample) {
-//            if (sample[sampleType]) {
-//                values.push([sample.longitude * 1, sample.latitude * 1, sample[sampleType] * 1]);
-//            }
-//        });
-//        var field = [];
-//        var min = Number.POSITIVE_INFINITY;
-//        var max = Number.NEGATIVE_INFINITY;
-//        for (var x = width; x >= 350; x--) {
-//            field[x] = [];
-//            for (var y = height; y >= 150; y--) {
-//                var p = projection.invert([x, y]);
-//                var v = f(p[0], p[1], 0, values, multiply, add);
-//                field[x][y] = v;
-//                if (v < min) {
-//                    min = v;
-//                }
-//                if (v > max) {
-//                    max = v;
-//                }
-//            }
-//        }
-//    });
-//
-//    function processScalarField(field, min, max, mask) {
-//        var styles = [];
-//        for (var i = 0; i < 255; i += 1) {
-//            styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
-//        }
-//        var range = max - min;
-//
-//        for (var x = 350; x < width; x+=1) {
-//            for (var y = 150; y < height; y+=1) {
-//                if (mask(x, y)) {
-//                    var v = field[x][y];
-//                    var style = styles[Math.floor((v-min)/range * (styles.length-1))];
-//                    g.fillStyle = style;
-//                    g.fillRect(x, y, 1, 1);
-//                }
-//            }
-//        }
-//    }
-//}
-
 function displayTimestamp(isoDate) {
     document.getElementById("date").textContent = "⁂ " + isoDate;
 }
@@ -347,7 +318,7 @@ function randomPoint(field) {
             console.log("fail");
             return [Math.floor(width / 2), Math.floor(height / 2)];
         }
-    } while (vectorAt(field, x, y) === noVector);
+    } while (!noField && vectorAt(field, x, y) === noVector);
     return [x, y];
 }
 
@@ -365,6 +336,8 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
         if (samples.length > 0) {
             displayTimestamp(samples[0].date);
         }
+
+        if (noField) { d.resolve([]); return d.promise; }
 
         var vectors = [];
         samples.forEach(function(sample) {
@@ -449,6 +422,8 @@ function processVectorField(field) {
         g.fillRect(0, 0, c.width, c.height);
         g.globalCompositeOperation = prev;
 
+        if (noField) return;
+
         g.lineWidth = 0.75;
         var buckets = [];
         for (var i = 0; i < styles.length; i++) {
@@ -510,4 +485,52 @@ function processVectorField(field) {
         }
     }
 }
+
+
+//function interpolateScalarField(resource, sampleType, mask) {
+//    d3.json(resource, function(error, samples) {
+//        var values = [];
+//        samples.forEach(function(sample) {
+//            if (sample[sampleType]) {
+//                values.push([sample.longitude * 1, sample.latitude * 1, sample[sampleType] * 1]);
+//            }
+//        });
+//        var field = [];
+//        var min = Number.POSITIVE_INFINITY;
+//        var max = Number.NEGATIVE_INFINITY;
+//        for (var x = width; x >= 350; x--) {
+//            field[x] = [];
+//            for (var y = height; y >= 150; y--) {
+//                var p = projection.invert([x, y]);
+//                var v = f(p[0], p[1], 0, values, multiply, add);
+//                field[x][y] = v;
+//                if (v < min) {
+//                    min = v;
+//                }
+//                if (v > max) {
+//                    max = v;
+//                }
+//            }
+//        }
+//    });
+//
+//    function processScalarField(field, min, max, mask) {
+//        var styles = [];
+//        for (var i = 0; i < 255; i += 1) {
+//            styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
+//        }
+//        var range = max - min;
+//
+//        for (var x = 350; x < width; x+=1) {
+//            for (var y = 150; y < height; y+=1) {
+//                if (mask(x, y)) {
+//                    var v = field[x][y];
+//                    var style = styles[Math.floor((v-min)/range * (styles.length-1))];
+//                    g.fillStyle = style;
+//                    g.fillRect(x, y, 1, 1);
+//                }
+//            }
+//        }
+//    }
+//}
 

@@ -6,3 +6,4 @@
 *.dylib binary
 *.o     binary
 *.so    binary
+*.ttf   binary
