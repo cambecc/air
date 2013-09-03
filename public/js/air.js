@@ -4,23 +4,6 @@ var π = Math.PI;
 var noField = false;
 
 /**
- * Maps the point (x, y) to index i into an HTML5 canvas image data array (row-major layout, each
- * pixel being four consecutive elements: [..., Ri, Gi+1, Bi+2, Ai+3, ...]).
- */
-function pixelIndex(x, y, width) {
-    return (y * width + x) * 4;
-}
-
-/**
- * Returns the distance between two points (x1, y1) and (x2, y2).
- */
-function distance(x0, y0, x1, y1) {
-    var Δx = x0 - x1;
-    var Δy = y0 - y1;
-    return Math.sqrt(Δx * Δx + Δy * Δy);
-}
-
-/**
  * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
  * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
  *
@@ -70,29 +53,26 @@ function loadJson(resource) {
     return d.promise;
 }
 
-
 function masker(renderTask) {
     if (noField) return when.resolve("no");
     return renderTask.then(function(canvas) {
         var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
         var width = canvas.width;
         return function(x, y) {
-            var i = pixelIndex(x, y, width);
-            return 0 <= i && i < data.length && data[i] > 0;
+            var i = (y * width + x) * 4;
+            return data[i] > 0;
         }
     });
 }
 
 function viewPort() {
-    var div = document.getElementById("display");
-    return {width: div.clientWidth, height: div.clientHeight};
-//    var w = window;
-//    var d = document;
-//    var e = d.documentElement;
-//    var g = d.getElementsByTagName('body')[0];
-//    var x = w.innerWidth || e.clientWidth || g.clientWidth;
-//    var y = w.innerHeight || e.clientHeight || g.clientHeight;
-//    return {width: x, height: y};
+    var w = window;
+    var d = document;
+    var e = d.documentElement;
+    var g = d.getElementsByTagName('body')[0];
+    var x = w.innerWidth || e.clientWidth || g.clientWidth;
+    var y = w.innerHeight || e.clientHeight || g.clientHeight;
+    return {width: x, height: y};
 }
 
 var view = viewPort();
@@ -152,7 +132,7 @@ function plotCurrentPosition(svg, projection) {
     }
 }
 
-loadJson("tk-topo.json").then(doProcess, console.error.bind(console));
+loadJson("tokyo-topo.json").then(doProcess, console.error.bind(console));
 
 function doProcess(tk) {
     console.time("building meshes");
@@ -218,8 +198,8 @@ function doProcess(tk) {
 //    var resource = "samples/2013/8/26/29"
 //    var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
 //    var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-    var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
-//    var resource = "samples/current";
+//    var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+    var resource = "samples/current";
 
     interpolateVectorField(resource, displayMaskTask, fieldMaskTask)
         .then(processVectorField)
@@ -245,17 +225,90 @@ function printCoord() {
     done = true;
 }
 
-function weight(x1, y1, x2, y2) {
-    var d = distance(x1, y1, x2, y2);
-    return 1 / (d * d);
+function displayTimestamp(isoDate) {
+    document.getElementById("date").textContent = "⁂ " + isoDate;
 }
 
-function multiply(x, y) {
-    return x * y;
+function buildTree(stations, depth) {
+    if (stations.length == 0) {
+        return null;
+    }
+    var axis = depth % 2;
+    var compareByAxis = function(a, b) {
+        return a.point[axis] - b.point[axis];
+    }
+    stations.sort(compareByAxis);
+
+    // Pivot where all stations to the left are _strictly smaller_ than the median.
+    var median = Math.floor(stations.length / 2);
+    var pivot = stations[median];
+    // Scan backwards for stations aligned on the same axis. We want to be at the beginning of any such sequence.
+    while (median > 0 && compareByAxis(pivot, stations[median - 1]) === 0) {
+        pivot = stations[--median];
+    }
+
+    var plane = pivot.point[axis];
+    pivot.planeDistance = function(p) { return plane - p[axis]; };
+    pivot.left = buildTree(stations.slice(0, median), depth + 1);
+    pivot.right = buildTree(stations.slice(median + 1), depth + 1);
+    return pivot;
 }
 
-function add(x, y) {
-    return x + y;
+function heapify(a, i, key) {
+    var length = a.length;
+    var child;
+    while ((child = i * 2 + 1) < length) {
+        var favorite = a[child];
+        var right = child + 1;
+        var r;
+        if (right < length && (r = a[right]).sqDistance > favorite.sqDistance) {
+            favorite = r;
+            child = right;
+        }
+        if (key.sqDistance >= favorite.sqDistance) {
+            break;
+        }
+        a[i] = favorite;
+        i = child;
+    }
+    a[i] = key;
+}
+
+function sqDistance(p0, p1) {
+    var Δx = p0[0] - p1[0];
+    var Δy = p0[1] - p1[1];
+    return Δx * Δx + Δy * Δy;
+}
+
+function nearest(point, node, best) {
+    var planeDistance = node.planeDistance(point);
+    var side;
+    var otherSide;
+    if (planeDistance <= 0) {
+        side = node.right;
+        otherSide = node.left;
+    }
+    else {
+        side = node.left;
+        otherSide = node.right;
+    }
+
+    if (side) {
+        nearest(point, side, best);
+    }
+    var d = sqDistance(point, node.point);
+    var x = best[0];
+    if (d < x.sqDistance) {
+        x.sqDistance = d;
+        x.station = node;
+        heapify(best, 0, x);
+    }
+
+    if (otherSide) {
+        if ((planeDistance * planeDistance) < best[0].sqDistance) {
+            nearest(point, otherSide, best);
+        }
+    }
 }
 
 function vectorScale(v, m) {
@@ -283,28 +336,42 @@ function vectorAdd(a, b) {
     return a;
 }
 
-var temp = [];  // HACK
-function f(x, y, initial, data, scale, add) {
+// HACKS
+var temp = [];
+var closest = [];
+for (var i = 0; i < 5; i++) {
+    closest.push({station: null, sqDistance: Number.POSITIVE_INFINITY});
+}
+
+function f(x, y, initial, root, scale, add) {
     var n = initial;
     var d = 0;
-    for (var i = 0; i < data.length; i++) {
-        var sample = data[i];
-        var value = sample[2];
-        var w = weight(x, y, sample[0], sample[1]);
-        if (w === Number.POSITIVE_INFINITY) {
+    var i;
+    for (i = 0; i < closest.length; i++) {
+        var ee = closest[i];
+        ee.station = null;
+        ee.sqDistance = Number.POSITIVE_INFINITY;
+    }
+
+    temp[0] = x;
+    temp[1] = y;
+    nearest(temp, root, closest);
+
+    for (i = 0; i < closest.length; i++) {
+        var e = closest[i];
+        var w = 1 / e.sqDistance;
+        if (w === Number.POSITIVE_INFINITY) {  // (x,y) is the same point as the sample.
             return value;
         }
-        temp[0] = value[0];  // DOESN'T WORK FOR SCALARS
-        temp[1] = value[1];
+        var sample = e.station.sample;
+        temp[0] = sample[0];  // DOESN'T WORK FOR SCALARS
+        temp[1] = sample[1];
         var s = scale(temp, w);
         n = add(n, s);
         d += w;
     }
-    return scale(n, 1 / d);
-}
 
-function displayTimestamp(isoDate) {
-    document.getElementById("date").textContent = "⁂ " + isoDate;
+    return scale(n, 1 / d);
 }
 
 function randomPoint(field) {
@@ -328,6 +395,7 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
     var d = when.defer();
 
     when.all([loadJson(resource), displayMaskTask, fieldMaskTask]).then(function(results) {
+        console.time("interpolating field");
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
         var samples = results[0];
         var displayMask = results[1];
@@ -339,16 +407,18 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
 
         if (noField) { d.resolve([]); return d.promise; }
 
-        var vectors = [];
-        samples.forEach(function(sample) {
-            if (sample.wd && sample.wv) {
-                var r = sample.wd / 180 * π;
-                vectors.push([
-                    sample.longitude * 1,
-                    sample.latitude * 1,
-                    [Math.atan2(Math.cos(r), Math.sin(r)), sample.wv * 1]]);
+        var stations = [];
+        samples.forEach(function(station) {
+            if (station.wd && station.wv) {
+                var r = station.wd / 180 * π;
+                var p = projection([station.longitude, station.latitude]);
+                station.point = p;
+                station.sample = [Math.atan2(Math.cos(r), Math.sin(r)), station.wv * 1];
+                stations.push(station);
             }
         });
+
+        var root = buildTree(stations, 0);
 
         var field = [];
         for (var x = 0; x < width; x++) {
@@ -356,12 +426,7 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
             for (var y = 0; y < height; y++) {
                 var v = noVector;
                 if (fieldMask(x, y)) {
-                    var p = projection.invert([x, y]);
-                    var px = p[0];
-                    var py = p[1];
-                    p[0] = 0;
-                    p[1] = 0;
-                    v = f(px, py, p, vectors, vectorScale, vectorAdd);
+                    v = f(x, y, [0, 0, 0], root, vectorScale, vectorAdd);
                     var r = v[0];
                     var m = v[1];
                     v[0] = Math.cos(r + π) * m;
@@ -372,7 +437,11 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
             }
         }
         d.resolve(field);
-    }).then(null, console.error.bind(console));
+        console.timeEnd("interpolating field");
+    }).then(null, function(error) {
+        console.error(error);
+        console.error(error.stack);
+    });
 
     return d.promise;
 }
@@ -471,8 +540,8 @@ function processVectorField(field) {
                 g.beginPath();
                 g.strokeStyle = styles[i];
                 bucket.forEach(function(particle) {
-//                    g.fillStyle = style; //"rgba(255, 255, 255, 1)";
-//                    g.fillRect(round(xt), round(yt), 1, 1);
+//                    g.fillStyle = styles[i]; //"rgba(255, 255, 255, 1)";
+//                    g.fillRect(particle.fxt, particle.fyt, 1, 1);
                     g.moveTo(particle.fx, particle.fy);
                     g.lineTo(particle.fxt, particle.fyt);
                 })
@@ -485,52 +554,3 @@ function processVectorField(field) {
         }
     }
 }
-
-
-//function interpolateScalarField(resource, sampleType, mask) {
-//    d3.json(resource, function(error, samples) {
-//        var values = [];
-//        samples.forEach(function(sample) {
-//            if (sample[sampleType]) {
-//                values.push([sample.longitude * 1, sample.latitude * 1, sample[sampleType] * 1]);
-//            }
-//        });
-//        var field = [];
-//        var min = Number.POSITIVE_INFINITY;
-//        var max = Number.NEGATIVE_INFINITY;
-//        for (var x = width; x >= 350; x--) {
-//            field[x] = [];
-//            for (var y = height; y >= 150; y--) {
-//                var p = projection.invert([x, y]);
-//                var v = f(p[0], p[1], 0, values, multiply, add);
-//                field[x][y] = v;
-//                if (v < min) {
-//                    min = v;
-//                }
-//                if (v > max) {
-//                    max = v;
-//                }
-//            }
-//        }
-//    });
-//
-//    function processScalarField(field, min, max, mask) {
-//        var styles = [];
-//        for (var i = 0; i < 255; i += 1) {
-//            styles.push("rgba(" + i + ", " + i + ", " + i + ", 0.6)");
-//        }
-//        var range = max - min;
-//
-//        for (var x = 350; x < width; x+=1) {
-//            for (var y = 150; y < height; y+=1) {
-//                if (mask(x, y)) {
-//                    var v = field[x][y];
-//                    var style = styles[Math.floor((v-min)/range * (styles.length-1))];
-//                    g.fillStyle = style;
-//                    g.fillRect(x, y, 1, 1);
-//                }
-//            }
-//        }
-//    }
-//}
-

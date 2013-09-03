@@ -83,18 +83,22 @@ end reset
 
 body {
     background: #202020;
+    overflow-x: hidden; /* ?? */
 }
 
 #display {
-    margin: 70px;
     position: relative;
-    height: 80vh;
 }
 
 #field {
     position: absolute;
     top: 0;
     left: 0;
+}
+
+#map, #field, #display {
+    /* display: inline-block; */  /* ?? */
+    line-height: 0; /* ?? */
 }
 
 #details {
