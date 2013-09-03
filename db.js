@@ -5,6 +5,7 @@ var _ = require("underscore");
 var tool = require("./tool");
 var when = require("when");
 var pg = require("pg");
+var schema = require("./schema");
 
 var connectionString = process.argv[2];  // for example: "postgres://postgres:12345@localhost:5432/air"
 var labels = ["year", "month", "day", "hour", "minute", "second"];
@@ -145,7 +146,7 @@ exports.upsert = function upsert(tableSpec, row) {
 function dateConstraint(date) {
     var parts = date.parts;
     var column = quoteName("date");
-    var table = quoteName("samples");
+    var table = quoteName(schema.samples.name);
 
     if (date.current) {
         var condition = tool.format("(SELECT MAX({0}) FROM {1})", column, table);
@@ -185,6 +186,7 @@ function sampleTypeConstraint(constraints) {
  * Returns a sql statement that selects samples matching the specified constraints.
  *
  * @param {Object} tableSpec
+ * @param {Object} stationTableSpec
  * @param {Object} constraints an object the describes the constraints for the select, having the form:
  *                  date: {current: Boolean, parts: [year, month, day, hour], zone: string},
  *                  sampleType: string column name for sample, or null or "all" if all requested.
@@ -247,6 +249,25 @@ exports.selectAll = function(tableSpec) {
     return {sql: stmt, args: []};
 }
 
+function quoteColumn(name) {
+    return name === "date" ?
+        tool.format("CAST({0} AS TEXT)", quoteName(name)) :
+        quoteName(name);
+}
+
+exports.selectSamplesCompact = function(constraints, columns) {
+    var samples = schema.samples;
+    var stations = schema.stations;
+
+    var stmt = "";
+    stmt += tool.format("SELECT {0}\n", columns.map(quoteColumn).join(", "));
+    stmt += tool.format("FROM {0} s INNER JOIN {1} t ", quoteName(samples.name), quoteName(stations.name));
+    stmt += tool.format("ON s.{0} = t.{1}\n", quoteName("stationId"), quoteName("id"));
+    stmt += tool.format("WHERE {0}", dateConstraint(constraints.date));
+
+    return {sql: stmt, args: []};
+}
+
 /**
  * Executes the specified statement, eventually.
  *
@@ -264,7 +285,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === "string" ? statement : statement.sql;
         var args = typeof statement === "string" ? [] : (statement.args || []);
 
-        console.log(sql + (args.length > 0 ? "; " + args : ""));
+//        console.log(sql + (args.length > 0 ? "; " + args : ""));
 
         client.query(sql, args, function(error, result) {
             done();

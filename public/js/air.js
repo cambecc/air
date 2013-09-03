@@ -4,6 +4,43 @@ var π = Math.PI;
 var noField = false;
 
 /**
+ * Writes the specified error and its call stack to the console.
+ */
+function reportError(error) {
+    console.error(error);
+    console.error(error.stack);
+}
+
+/**
+ * Returns a promise for a JSON resource (URL) fetched via XHR.
+ */
+function loadJson(resource) {
+    var d = when.defer();
+    d3.json(resource, function(error, result) {
+        return error ? d.reject(error) : d.resolve(result);
+    });
+    return d.promise;
+}
+
+//var resource = "samples/2013/8/24/16"
+//var resource = "samples/2013/8/21/15"
+//var resource = "samples/2013/8/20/22"
+//var resource = "samples/2013/8/20/20"
+//var resource = "samples/2013/8/20/18"
+//var resource = "samples/2013/8/18/17"  // strong northerly wind
+//var resource = "samples/2013/8/16/15"
+//var resource = "samples/2013/8/12/19"  // max wind at one station
+var resource = "samples/2013/8/27/12"  // gentle breeze
+//var resource = "samples/2013/8/26/29"
+//var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
+//var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
+//var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+//var resource = "samples/current";
+
+var topoTask = loadJson("tokyo-topo.json");
+var dataTask = loadJson(resource);
+
+/**
  * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
  * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
  *
@@ -35,22 +72,6 @@ function createProjection(boundingBox, view) {
     var t = [view.width / 2, view.height / 2];
 
     return projection.scale(s).translate(t);
-}
-
-/**
- * Returns a promise for a JSON resource (URL) fetched via XHR.
- */
-function loadJson(resource) {
-    var d = when.defer();
-    d3.json(resource, function(error, result) {
-        if (error) {
-            d.reject(error);
-        }
-        else {
-            d.resolve(result);
-        }
-    });
-    return d.promise;
 }
 
 function masker(renderTask) {
@@ -127,21 +148,21 @@ function plotCurrentPosition(svg, projection) {
                     svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
                 }
             },
-            console.error.bind(console),
+            reportError,
             {enableHighAccuracy: true});
     }
 }
 
-loadJson("tokyo-topo.json").then(doProcess, console.error.bind(console));
+topoTask.then(doProcess).then(null, reportError);
 
-function doProcess(tk) {
+function doProcess(topo) {
     console.time("building meshes");
 
-    projection = createProjection(tk.bbox, view);
+    projection = createProjection(topo.bbox, view);
 
     var path = d3.geo.path().projection(projection);
-    var outerBoundary = topojson.mesh(tk, tk.objects.tk, function(a, b) { return a === b; });
-    var divisionBoundaries = topojson.mesh(tk, tk.objects.tk, function (a, b) { return a !== b; });
+    var outerBoundary = topojson.mesh(topo, topo.objects.tk, function(a, b) { return a === b; });
+    var divisionBoundaries = topojson.mesh(topo, topo.objects.tk, function (a, b) { return a !== b; });
 
     console.timeEnd("building meshes");
 
@@ -178,32 +199,23 @@ function doProcess(tk) {
 
     plotCurrentPosition(mapSvg, projection);
 
-    loadJson("stations/geo").then(function(stations) {
+    dataTask.then(function(data) {
+        var features = data[Object.keys(data)[0]].map(function(e) {
+            return {
+                type: "Features",
+                properties: {name: e.stationId.toString()},
+                geometry: {type: "Point", coordinates: e.coordinates}};
+        });
         path.pointRadius(1);
         mapSvg.append("path")
-            .datum(stations)
+            .datum({type: "FeatureCollection", features: features})
             .attr("class", "station")
             .attr("d", path);
-    }).then(null, console.error.bind(console));
+    }).then(null, reportError);
 
-//    var resource = "samples/2013/8/24/16"
-//    var resource = "samples/2013/8/21/15"
-//    var resource = "samples/2013/8/20/22"
-//    var resource = "samples/2013/8/20/20"
-//    var resource = "samples/2013/8/20/18"
-//    var resource = "samples/2013/8/18/17"  // strong northerly wind
-//    var resource = "samples/2013/8/16/15"
-//    var resource = "samples/2013/8/12/19"  // max wind at one station
-//    var resource = "samples/2013/8/27/12"  // gentle breeze
-//    var resource = "samples/2013/8/26/29"
-//    var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
-//    var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-//    var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
-    var resource = "samples/current";
-
-    interpolateVectorField(resource, displayMaskTask, fieldMaskTask)
+    interpolateVectorField(displayMaskTask, fieldMaskTask)
         .then(processVectorField)
-        .then(null, console.error.bind(console));
+        .then(null, reportError);
 }
 
 function printCoord() {
@@ -340,7 +352,7 @@ function vectorAdd(a, b) {
 var temp = [];
 var closest = [];
 for (var i = 0; i < 5; i++) {
-    closest.push({station: null, sqDistance: Number.POSITIVE_INFINITY});
+    closest.push({station: null, sqDistance: Infinity});
 }
 
 function f(x, y, initial, root, scale, add) {
@@ -350,7 +362,7 @@ function f(x, y, initial, root, scale, add) {
     for (i = 0; i < closest.length; i++) {
         var ee = closest[i];
         ee.station = null;
-        ee.sqDistance = Number.POSITIVE_INFINITY;
+        ee.sqDistance = Infinity;
     }
 
     temp[0] = x;
@@ -360,7 +372,7 @@ function f(x, y, initial, root, scale, add) {
     for (i = 0; i < closest.length; i++) {
         var e = closest[i];
         var w = 1 / e.sqDistance;
-        if (w === Number.POSITIVE_INFINITY) {  // (x,y) is the same point as the sample.
+        if (w === Infinity) {  // (x, y) is the same point as the sample.
             return value;
         }
         var sample = e.station.sample;
@@ -391,29 +403,28 @@ function randomPoint(field) {
 
 var noVector = [0, 0, -1];
 
-function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
+function interpolateVectorField(displayMaskTask, fieldMaskTask) {
     var d = when.defer();
 
-    when.all([loadJson(resource), displayMaskTask, fieldMaskTask]).then(function(results) {
+    when.all([dataTask, displayMaskTask, fieldMaskTask]).then(function(results) {
         console.time("interpolating field");
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
         var samples = results[0];
         var displayMask = results[1];
         var fieldMask = results[2];
 
-        if (samples.length > 0) {
-            displayTimestamp(samples[0].date);
-        }
+        var date = Object.keys(samples)[0];
+        displayTimestamp(date);
 
         if (noField) { d.resolve([]); return d.promise; }
 
         var stations = [];
-        samples.forEach(function(station) {
-            if (station.wd && station.wv) {
-                var r = station.wd / 180 * π;
-                var p = projection([station.longitude, station.latitude]);
-                station.point = p;
-                station.sample = [Math.atan2(Math.cos(r), Math.sin(r)), station.wv * 1];
+        samples[date].forEach(function(station) {
+            var wind = station.wind;
+            if (wind[0] && wind[1]) {
+                var r = wind[0] / 180 * π;
+                station.point = projection(station.coordinates);
+                station.sample = [Math.atan2(Math.cos(r), Math.sin(r)), wind[1]];
                 stations.push(station);
             }
         });
@@ -438,10 +449,7 @@ function interpolateVectorField(resource, displayMaskTask, fieldMaskTask) {
         }
         d.resolve(field);
         console.timeEnd("interpolating field");
-    }).then(null, function(error) {
-        console.error(error);
-        console.error(error.stack);
-    });
+    }).then(null, reportError);
 
     return d.promise;
 }
