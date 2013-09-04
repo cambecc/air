@@ -4,9 +4,10 @@ var noField = false;
 var π = Math.PI;
 var noVector = [0, 0, -1];
 var projection;  // ugh. global to this script, but assigned asynchronously
+var bbox;
 var particleCount = 5000;
-var particleMaxAge = 30;
-var frameRate = 35; // one frame per this many milliseconds
+var particleMaxAge = 40;
+var frameRate = 32; // one frame per this many milliseconds
 var done = false;
 
 /**
@@ -49,8 +50,9 @@ d3.select("#field-canvas").on("click", displayCoordinates);
 //var resource = "samples/2013/8/26/29"
 //var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
 //var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
-//var resource = "samples/current";
+//var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+//var resource = "samples/2013/9/4/23"  // odd interpolation
+var resource = "samples/current";
 
 var topoTask = loadJson("tokyo-topo.json");
 var dataTask = loadJson(resource);
@@ -208,6 +210,10 @@ function doProcess(topo) {
     log.time("building meshes");
 
     projection = createProjection(topo.bbox, view.width, view.height);
+
+    var ur = projection([topo.bbox[0], topo.bbox[3]]);
+    var ll = projection([topo.bbox[2], topo.bbox[1]]);
+    bbox = [ur.map(Math.floor), ll.map(Math.ceil)];
 
     var path = d3.geo.path().projection(projection);
     var outerBoundary = topojson.mesh(topo, topo.objects.tk, function(a, b) { return a === b; });
@@ -489,11 +495,13 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
 
 function processVectorField(field) {
     var particles = [];
+    var width = bbox[1][0] - bbox[0][0] + 1;
+    var height = bbox[1][1] - bbox[0][1] + 1;
 
     function vectorAt(x, y) {
-        var column = field[x];
+        var column = field[Math.round(x)];
         if (column) {
-            var v = column[y];
+            var v = column[Math.round(y)];
             if (v) {
                 return v;
             }
@@ -506,12 +514,12 @@ function processVectorField(field) {
         var y;
         var i = 30;
         do {
-            x = Math.floor(Math.random() * (view.width - 1));
-            y = Math.floor(Math.random() * (view.height - 1));
-            if (--i == 0) {  // UNDONE: ugh. remove this check. make better.
+            x = Math.random() * width + bbox[0][0];
+            y = Math.random() * height + bbox[0][1];
+            if (--i == 0) {  // UNDONE: ugh. remove this check. make better. somehow.
                 log.debug("hrm");
-                x = Math.floor(view.width / 2);
-                y = Math.floor(view.height / 2);
+                x = width / 2;
+                y = height / 2;
                 break;
             }
         } while (!noField && vectorAt(x, y) === noVector);
@@ -535,6 +543,7 @@ function processVectorField(field) {
 
     var c = fieldCanvas;
     var g = c.getContext("2d");
+    g.lineWidth = 0.75;
 
     draw();
 
@@ -542,12 +551,11 @@ function processVectorField(field) {
         var prev = g.globalCompositeOperation;
         g.fillStyle = "rgba(0, 0, 0, 0.93)";
         g.globalCompositeOperation = "destination-in";
-        g.fillRect(0, 0, c.width, c.height);
+        g.fillRect(bbox[0][0], bbox[0][1], width, height);
         g.globalCompositeOperation = prev;
 
         if (noField) return;
 
-        g.lineWidth = 0.75;
         var buckets = [];
         for (var i = 0; i < styles.length; i++) {
             buckets[i] = [];
@@ -562,25 +570,24 @@ function processVectorField(field) {
             // get vector at current location
             var x = particle.x;
             var y = particle.y;
-            var fx = Math.round(x);
-            var fy = Math.round(y);
 
-            var v = vectorAt(fx, fy);
-            if (v !== noVector) {
-                var xt = x + v[0];
-                var yt = y + v[1];
-                var fxt = Math.round(xt);
-                var fyt = Math.round(yt);
-                var m = v[2];
+            var v = vectorAt(x, y);
+            if (v === noVector) {  // particle has gone off the field, never to return...
+                particle.age = particleMaxAge + 1;
+                return;
+            }
 
-                if (m >= 0 && vectorAt(fxt, fyt)[2] >= 0) {
-                    var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
-                    particle.fx = fx;
-                    particle.fy = fy;
-                    particle.fxt = fxt;
-                    particle.fyt = fyt;
-                    buckets[i].push(particle);
-                }
+            var xt = x + v[0];
+            var yt = y + v[1];
+            var m = v[2];
+
+            if (m >= 0 && vectorAt(xt, yt)[2] >= 0) {
+                var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
+                particle.xt = xt;
+                particle.yt = yt;
+                buckets[i].push(particle);
+            }
+            else {
                 particle.x = xt;
                 particle.y = yt;
             }
@@ -594,9 +601,11 @@ function processVectorField(field) {
                 bucket.forEach(function(particle) {
 //                    g.fillStyle = styles[i]; //"rgba(255, 255, 255, 1)";
 //                    g.fillRect(particle.fxt, particle.fyt, 1, 1);
-                    g.moveTo(particle.fx, particle.fy);
-                    g.lineTo(particle.fxt, particle.fyt);
-                })
+                    g.moveTo(particle.x, particle.y);
+                    g.lineTo(particle.xt, particle.yt);
+                    particle.x = particle.xt;
+                    particle.y = particle.yt;
+                });
                 g.stroke();
             }
         });
