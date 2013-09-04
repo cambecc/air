@@ -1,14 +1,62 @@
 "use strict";
 
-var π = Math.PI;
 var noField = false;
 
+var π = Math.PI;
+var log = {
+    debug:   function(s) { console.log(s); },
+    info:    function(s) { console.info(s); },
+    error:   function(e) { console.error(e.stack ? e.stack : e); },
+    time:    function(s) { console.time(s); },
+    timeEnd: function(s) { console.timeEnd(s); }
+}
+
 /**
- * Writes the specified error and its call stack to the console.
+ * Returns an object {width:, height:} for the size of the browser's view.
  */
-function reportError(error) {
-    console.error(error);
-    console.error(error.stack);
+function viewPort() {
+    var w = window, d = document.documentElement, b = document.getElementsByTagName('body')[0];
+    var x = w.innerWidth || d.clientWidth || b.clientWidth;
+    var y = w.innerHeight || d.clientHeight || b.clientHeight;
+    return {width: x, height: y};
+}
+
+/**
+ * Returns a human readable string of the provided coordinates.
+ */
+function formatCoordinates(lng, lat) {
+    return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
+           Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+}
+
+/**
+ * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
+ * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
+ */
+function createProjection(boundingBox, width, height) {
+    var lng0 = boundingBox[0];  // lower left longitude
+    var lat0 = boundingBox[1];  // lower left latitude
+    var lng1 = boundingBox[2];  // upper right longitude
+    var lat1 = boundingBox[3];  // upper right latitude
+
+    // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
+    // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
+    var projection = d3.geo.albers()
+        .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
+        .center([0, (lat0 + lat1) / 2])    // set the globe vertically on the bounding box's center.
+        .scale(1)
+        .translate([0, 0]);
+
+    // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
+    var p0 = projection([lng0, lat0]);
+    var p1 = projection([lng1, lat1]);
+    // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
+    // Reduce by 5% for a nice border.
+    var s = 1 / Math.max((p1[0] - p0[0]) / width, (p0[1] - p1[1]) / height) * 0.95;
+    // Move the center to (0, 0) in pixel space.
+    var t = [width / 2, height / 2];
+
+    return projection.scale(s).translate(t);
 }
 
 /**
@@ -30,49 +78,15 @@ function loadJson(resource) {
 //var resource = "samples/2013/8/18/17"  // strong northerly wind
 //var resource = "samples/2013/8/16/15"
 //var resource = "samples/2013/8/12/19"  // max wind at one station
-var resource = "samples/2013/8/27/12"  // gentle breeze
+//var resource = "samples/2013/8/27/12"  // gentle breeze
 //var resource = "samples/2013/8/26/29"
 //var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
 //var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-//var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
 //var resource = "samples/current";
 
 var topoTask = loadJson("tokyo-topo.json");
 var dataTask = loadJson(resource);
-
-/**
- * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
- * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
- *
- * @param boundingBox an array of four values: longitude and latitude for the lower left and then upper right
- *        points of the bounding box, respectively.
- * @param view the view port as an object {width: Number, height: Number}
- * @returns a d3 projection
- */
-function createProjection(boundingBox, view) {
-    var lng0 = boundingBox[0];  // lower left longitude
-    var lat0 = boundingBox[1];  // lower left latitude
-    var lng1 = boundingBox[2];  // upper right longitude
-    var lat1 = boundingBox[3];  // upper right latitude
-
-    // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
-    // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
-    var projection = d3.geo.albers()
-        .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
-        .center([0, (lat0 + lat1) / 2])  // set the globe vertically on the bounding box's center.
-        .scale(1)
-        .translate([0, 0]);
-
-    // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
-    var p0 = projection([lng0, lat0]);
-    var p1 = projection([lng1, lat1]);
-    // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
-    var s = 0.95 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height);
-    // Move the center to (0, 0) in pixel space.
-    var t = [view.width / 2, view.height / 2];
-
-    return projection.scale(s).translate(t);
-}
 
 function masker(renderTask) {
     if (noField) return when.resolve("no");
@@ -86,15 +100,6 @@ function masker(renderTask) {
     });
 }
 
-function viewPort() {
-    var w = window;
-    var d = document;
-    var e = d.documentElement;
-    var g = d.getElementsByTagName('body')[0];
-    var x = w.innerWidth || e.clientWidth || g.clientWidth;
-    var y = w.innerHeight || e.clientHeight || g.clientHeight;
-    return {width: x, height: y};
-}
 
 var view = viewPort();
 var width = view.width, height = view.height;
@@ -108,7 +113,7 @@ var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height",
 var c = fieldCanvas;
 var g = c.getContext("2d");
 
-d3.select("#field-canvas").on("click", printCoord);
+d3.select("#field-canvas").on("click", displayCoordinates);
 
 function render(width, height, appendTo) {
     var d = when.defer();
@@ -116,7 +121,7 @@ function render(width, height, appendTo) {
     if (noField) { d.resolve("no"); return d.promise; }
 
     setTimeout(function() {
-        console.time("rendering canvas");
+        log.time("rendering canvas");
 
         var div = document.createElement("div");
         var svg = document.createElement("svg");
@@ -131,7 +136,7 @@ function render(width, height, appendTo) {
         canvas.setAttribute("height", height);
         canvg(canvas, div.innerHTML.trim());
 
-        console.timeEnd("rendering canvas");
+        log.timeEnd("rendering canvas");
         d.resolve(canvas);
     }, 25);
     return d.promise;
@@ -148,25 +153,25 @@ function plotCurrentPosition(svg, projection) {
                     svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
                 }
             },
-            reportError,
+            log.error,
             {enableHighAccuracy: true});
     }
 }
 
-topoTask.then(doProcess).then(null, reportError);
+topoTask.then(doProcess).then(null, log.error);
 
 function doProcess(topo) {
-    console.time("building meshes");
+    log.time("building meshes");
 
-    projection = createProjection(topo.bbox, view);
+    projection = createProjection(topo.bbox, view.width, view.height);
 
     var path = d3.geo.path().projection(projection);
     var outerBoundary = topojson.mesh(topo, topo.objects.tk, function(a, b) { return a === b; });
     var divisionBoundaries = topojson.mesh(topo, topo.objects.tk, function (a, b) { return a !== b; });
 
-    console.timeEnd("building meshes");
+    log.timeEnd("building meshes");
 
-    console.time("rendering map");
+    log.time("rendering map");
     mapSvg.append("path")
         .datum(outerBoundary)
         .attr("class", "tk-outboundary")
@@ -175,7 +180,7 @@ function doProcess(topo) {
         .datum(divisionBoundaries)
         .attr("class", "tk-inboundary")
         .attr("d", path);
-    console.timeEnd("rendering map");
+    log.timeEnd("rendering map");
 
     var displayMaskTask = masker(
         render(width, height, function(svg) {
@@ -200,7 +205,7 @@ function doProcess(topo) {
     plotCurrentPosition(mapSvg, projection);
 
     dataTask.then(function(data) {
-        var features = data[Object.keys(data)[0]].map(function(e) {
+        var features = data[Object.keys(data)[0]].map(function(e) {  // UNDONE: object.keys(data)[0] is annoying
             return {
                 type: "Features",
                 properties: {name: e.stationId.toString()},
@@ -211,29 +216,16 @@ function doProcess(topo) {
             .datum({type: "FeatureCollection", features: features})
             .attr("class", "station")
             .attr("d", path);
-    }).then(null, reportError);
+    }).then(null, log.error);
 
     interpolateVectorField(displayMaskTask, fieldMaskTask)
         .then(processVectorField)
-        .then(null, reportError);
+        .then(null, log.error);
 }
 
-function printCoord() {
-    var coordinates = projection.invert(d3.mouse(this));
-    var lng = coordinates[0];
-    var lat = coordinates[1];
-    var ew = "E";
-    if (lng < 0) {
-        lng = -lng;
-        ew = "W";
-    }
-    var ns = "N";
-    if (lat < 0) {
-        lat = -lat;
-        ns = "S";
-    }
-    document.getElementById("location").textContent =
-        "⁂ " + lat.toFixed(6) + "º " + ns + ", " + lng.toFixed(6) + "º " + ew;
+function displayCoordinates() {
+    var c = projection.invert(d3.mouse(this));
+    document.getElementById("location").textContent = "⁂ " + formatCoordinates(c[0], c[1]);
     done = true;
 }
 
@@ -241,7 +233,7 @@ function displayTimestamp(isoDate) {
     document.getElementById("date").textContent = "⁂ " + isoDate;
 }
 
-function buildTree(stations, depth) {
+function kdTree(stations, depth) {
     if (stations.length == 0) {
         return null;
     }
@@ -261,8 +253,8 @@ function buildTree(stations, depth) {
 
     var plane = pivot.point[axis];
     pivot.planeDistance = function(p) { return plane - p[axis]; };
-    pivot.left = buildTree(stations.slice(0, median), depth + 1);
-    pivot.right = buildTree(stations.slice(median + 1), depth + 1);
+    pivot.left = kdTree(stations.slice(0, median), depth + 1);
+    pivot.right = kdTree(stations.slice(median + 1), depth + 1);
     return pivot;
 }
 
@@ -273,11 +265,11 @@ function heapify(a, i, key) {
         var favorite = a[child];
         var right = child + 1;
         var r;
-        if (right < length && (r = a[right]).sqDistance > favorite.sqDistance) {
+        if (right < length && (r = a[right]).distance2 > favorite.distance2) {
             favorite = r;
             child = right;
         }
-        if (key.sqDistance >= favorite.sqDistance) {
+        if (key.distance2 >= favorite.distance2) {
             break;
         }
         a[i] = favorite;
@@ -286,7 +278,10 @@ function heapify(a, i, key) {
     a[i] = key;
 }
 
-function sqDistance(p0, p1) {
+/**
+ * Returns the square of the distance between the two specified points [x0, y0] and [x1, y1].
+ */
+function distance2(p0, p1) {
     var Δx = p0[0] - p1[0];
     var Δy = p0[1] - p1[1];
     return Δx * Δx + Δy * Δy;
@@ -308,43 +303,30 @@ function nearest(point, node, best) {
     if (side) {
         nearest(point, side, best);
     }
-    var d = sqDistance(point, node.point);
+    var d2 = distance2(point, node.point);
     var x = best[0];
-    if (d < x.sqDistance) {
-        x.sqDistance = d;
+    if (d2 < x.distance2) {
+        x.distance2 = d2;
         x.station = node;
         heapify(best, 0, x);
     }
 
     if (otherSide) {
-        if ((planeDistance * planeDistance) < best[0].sqDistance) {
+        if ((planeDistance * planeDistance) < best[0].distance2) {
             nearest(point, otherSide, best);
         }
     }
 }
 
-function vectorScale(v, m) {
-    v[1] *= m;
+function vectorScale(v, s) {
+    v[0] *= s;
+    v[1] *= s;
     return v;
 }
 
 function vectorAdd(a, b) {
-    var ax = Math.cos(a[0]) * a[1];
-    var ay = Math.sin(a[0]) * a[1];
-    var bx = Math.cos(b[0]) * b[1];
-    var by = Math.sin(b[0]) * b[1];
-
-    var cx = ax + bx;
-    var cy = ay + by;
-
-    var r = Math.atan2(cy, cx);
-    var m = Math.sqrt(cx * cx + cy * cy);
-
-    if (!isFinite(r)) {
-        r = 0;
-    }
-    a[0] = r;
-    a[1] = m;
+    a[0] = a[0] + b[0];
+    a[1] = a[1] + b[1];
     return a;
 }
 
@@ -352,17 +334,17 @@ function vectorAdd(a, b) {
 var temp = [];
 var closest = [];
 for (var i = 0; i < 5; i++) {
-    closest.push({station: null, sqDistance: Infinity});
+    closest.push({});
 }
 
-function f(x, y, initial, root, scale, add) {
+function f(x, y, initial, root) {
     var n = initial;
     var d = 0;
     var i;
     for (i = 0; i < closest.length; i++) {
         var ee = closest[i];
         ee.station = null;
-        ee.sqDistance = Infinity;
+        ee.distance2 = Infinity;
     }
 
     temp[0] = x;
@@ -371,19 +353,19 @@ function f(x, y, initial, root, scale, add) {
 
     for (i = 0; i < closest.length; i++) {
         var e = closest[i];
-        var w = 1 / e.sqDistance;
+        var w = 1 / e.distance2;
         if (w === Infinity) {  // (x, y) is the same point as the sample.
             return value;
         }
         var sample = e.station.sample;
         temp[0] = sample[0];  // DOESN'T WORK FOR SCALARS
         temp[1] = sample[1];
-        var s = scale(temp, w);
-        n = add(n, s);
+        var s = vectorScale(temp, w);
+        n = vectorAdd(n, s);
         d += w;
     }
 
-    return scale(n, 1 / d);
+    return vectorScale(n, 1 / d);
 }
 
 function randomPoint(field) {
@@ -394,7 +376,7 @@ function randomPoint(field) {
         x = Math.floor(Math.random() * (width - 1));
         y = Math.floor(Math.random() * (height - 1));
         if (--i == 0) {  // UNDONE: remove this check. make better.
-            console.log("fail");
+            log.debug("hrm");
             return [Math.floor(width / 2), Math.floor(height / 2)];
         }
     } while (!noField && vectorAt(field, x, y) === noVector);
@@ -403,11 +385,21 @@ function randomPoint(field) {
 
 var noVector = [0, 0, -1];
 
+function polarToRectangular(v) {
+    var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
+    var cr = wd_deg / 180 * π;  // convert to cardinal radians
+    var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // wind direction in standard radians
+    var wv = v[1];  // wind velocity
+    var x = Math.cos(wd_rad) * wv;
+    var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space increases downwards
+    return [x, y];
+}
+
 function interpolateVectorField(displayMaskTask, fieldMaskTask) {
     var d = when.defer();
 
     when.all([dataTask, displayMaskTask, fieldMaskTask]).then(function(results) {
-        console.time("interpolating field");
+        log.time("interpolating field");
         // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
         var samples = results[0];
         var displayMask = results[1];
@@ -420,16 +412,14 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
 
         var stations = [];
         samples[date].forEach(function(station) {
-            var wind = station.wind;
-            if (wind[0] && wind[1]) {
-                var r = wind[0] / 180 * π;
+            if (station.wind[0] && station.wind[1]) {
                 station.point = projection(station.coordinates);
-                station.sample = [Math.atan2(Math.cos(r), Math.sin(r)), wind[1]];
+                station.sample = polarToRectangular(station.wind);
                 stations.push(station);
             }
         });
 
-        var root = buildTree(stations, 0);
+        var root = kdTree(stations, 0);
 
         var field = [];
         for (var x = 0; x < width; x++) {
@@ -437,19 +427,15 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
             for (var y = 0; y < height; y++) {
                 var v = noVector;
                 if (fieldMask(x, y)) {
-                    v = f(x, y, [0, 0, 0], root, vectorScale, vectorAdd);
-                    var r = v[0];
-                    var m = v[1];
-                    v[0] = Math.cos(r + π) * m;
-                    v[1] = -Math.sin(r + π) * m;
-                    v[2] = displayMask(x, y) ? m : -1;
+                    v = f(x, y, [0, 0, 0], root);
+                    v[2] = displayMask(x, y) ? Math.sqrt(v[0]*v[0] + v[1]*v[1]) : -1;
                 }
                 column[y] = v;
             }
         }
         d.resolve(field);
-        console.timeEnd("interpolating field");
-    }).then(null, reportError);
+        log.timeEnd("interpolating field");
+    }).then(null, log.error);
 
     return d.promise;
 }
