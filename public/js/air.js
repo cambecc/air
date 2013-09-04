@@ -1,32 +1,111 @@
 "use strict";
 
 var noField = false;
-
 var π = Math.PI;
-var log = {
-    debug:   function(s) { console.log(s); },
-    info:    function(s) { console.info(s); },
-    error:   function(e) { console.error(e.stack ? e.stack : e); },
-    time:    function(s) { console.time(s); },
-    timeEnd: function(s) { console.timeEnd(s); }
-}
+var noVector = [0, 0, -1];
+var projection;  // ugh. global to this script, but assigned asynchronously
+var particleCount = 5000;
+var particleMaxAge = 30;
+var frameRate = 35; // one frame per this many milliseconds
+var done = false;
 
 /**
- * Returns an object {width:, height:} for the size of the browser's view.
+ * An object to perform cross-browser logging.
  */
-function viewPort() {
+var log = function() {
+    return {
+        debug:   function(s) { console.log(s); },
+        info:    function(s) { console.info(s); },
+        error:   function(e) { console.error(e.stack ? e.stack : e); },
+        time:    function(s) { console.time(s); },
+        timeEnd: function(s) { console.timeEnd(s); }
+    };
+}();
+
+/**
+ * An object {width:, height:} that is the size of the browser's view.
+ */
+var view = function() {
     var w = window, d = document.documentElement, b = document.getElementsByTagName('body')[0];
     var x = w.innerWidth || d.clientWidth || b.clientWidth;
     var y = w.innerHeight || d.clientHeight || b.clientHeight;
     return {width: x, height: y};
-}
+}();
+
+var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
+var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
+
+d3.select("#field-canvas").on("click", displayCoordinates);
+
+//var resource = "samples/2013/8/24/16"
+//var resource = "samples/2013/8/21/15"
+//var resource = "samples/2013/8/20/22"
+//var resource = "samples/2013/8/20/20"
+//var resource = "samples/2013/8/20/18"
+//var resource = "samples/2013/8/18/17"  // strong northerly wind
+//var resource = "samples/2013/8/16/15"
+//var resource = "samples/2013/8/12/19"  // max wind at one station
+//var resource = "samples/2013/8/27/12"  // gentle breeze
+//var resource = "samples/2013/8/26/29"
+//var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
+//var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
+var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
+//var resource = "samples/current";
+
+var topoTask = loadJson("tokyo-topo.json");
+var dataTask = loadJson(resource);
+
+topoTask.then(doProcess).then(null, log.error);
 
 /**
- * Returns a human readable string of the provided coordinates.
+ * Returns a human readable string for the provided coordinates.
  */
 function formatCoordinates(lng, lat) {
     return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
            Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+}
+
+/**
+ * Multiply the vector v (in rectangular [x, y] form) by the scalar s and return it.
+ */
+function scaleVector(v, s) {
+    v[0] *= s;
+    v[1] *= s;
+    return v;
+}
+
+/**
+ * Add the second vector into the first and return it. Both vectors must be in rectangular [x, y] form.
+ */
+function addVectors(a, b) {
+    a[0] += b[0];
+    a[1] += b[1];
+    return a;
+}
+
+/**
+ * Returns the square of the distance between the two specified points p0: [x0, y0] and p1: [x1, y1].
+ */
+function distance2(p0, p1) {
+    var Δx = p0[0] - p1[0];
+    var Δy = p0[1] - p1[1];
+    return Δx * Δx + Δy * Δy;
+}
+
+/**
+ * Converts an into-the-wind polar vector with cardinal degrees to a with-the-wind rectangular vector
+ * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
+ * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
+ * would point _to_ the SE (assuming the top of the display represents North).
+ */
+function polarToRectangular(v) {
+    var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
+    var cr = wd_deg / 180 * π;  // convert to cardinal radians, clockwise
+    var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // convert to standard radians, counter-clockwise
+    var wv = v[1];  // wind velocity
+    var x = Math.cos(wd_rad) * wv;
+    var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space increases downwards
+    return [x, y];  // rectangular form wind vector in pixel space
 }
 
 /**
@@ -70,24 +149,6 @@ function loadJson(resource) {
     return d.promise;
 }
 
-//var resource = "samples/2013/8/24/16"
-//var resource = "samples/2013/8/21/15"
-//var resource = "samples/2013/8/20/22"
-//var resource = "samples/2013/8/20/20"
-//var resource = "samples/2013/8/20/18"
-//var resource = "samples/2013/8/18/17"  // strong northerly wind
-//var resource = "samples/2013/8/16/15"
-//var resource = "samples/2013/8/12/19"  // max wind at one station
-//var resource = "samples/2013/8/27/12"  // gentle breeze
-//var resource = "samples/2013/8/26/29"
-//var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
-//var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
-//var resource = "samples/current";
-
-var topoTask = loadJson("tokyo-topo.json");
-var dataTask = loadJson(resource);
-
 function masker(renderTask) {
     if (noField) return when.resolve("no");
     return renderTask.then(function(canvas) {
@@ -99,21 +160,6 @@ function masker(renderTask) {
         }
     });
 }
-
-
-var view = viewPort();
-var width = view.width, height = view.height;
-
-var projection;  // ugh. global to this script, but assigned asynchronously
-var done = false;
-
-var mapSvg = d3.select("#map-svg").attr("width", width).attr("height", height);
-var fieldCanvas = d3.select("#field-canvas").attr("width", width).attr("height", height)[0][0];
-
-var c = fieldCanvas;
-var g = c.getContext("2d");
-
-d3.select("#field-canvas").on("click", displayCoordinates);
 
 function render(width, height, appendTo) {
     var d = when.defer();
@@ -149,7 +195,7 @@ function plotCurrentPosition(svg, projection) {
                 var p = projection([position.coords.longitude, position.coords.latitude]);
                 var x = Math.round(p[0]);
                 var y = Math.round(p[1]);
-                if (0 <= x && x < width && 0 <= y && y < height) {
+                if (0 <= x && x < view.width && 0 <= y && y < view.height) {
                     svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
                 }
             },
@@ -157,8 +203,6 @@ function plotCurrentPosition(svg, projection) {
             {enableHighAccuracy: true});
     }
 }
-
-topoTask.then(doProcess).then(null, log.error);
 
 function doProcess(topo) {
     log.time("building meshes");
@@ -183,7 +227,7 @@ function doProcess(topo) {
     log.timeEnd("rendering map");
 
     var displayMaskTask = masker(
-        render(width, height, function(svg) {
+        render(view.width, view.height, function(svg) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
@@ -193,19 +237,19 @@ function doProcess(topo) {
         }));
 
     var fieldMaskTask = masker(
-        render(width, height, function(svg) {
+        render(view.width, view.height, function(svg) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
                 .attr("stroke-width", "30")  // FF does NOT like a large number here--even canvg is slow
-                .attr("stroke", "#fff")// Also, the stroke-width should scale with canvas size
+                .attr("stroke", "#fff")  // Also, the stroke-width should scale with canvas size
                 .attr("d", path);
         }));
 
     plotCurrentPosition(mapSvg, projection);
 
     dataTask.then(function(data) {
-        var features = data[Object.keys(data)[0]].map(function(e) {  // UNDONE: object.keys(data)[0] is annoying
+        var features = data[0].samples.map(function(e) {
             return {
                 type: "Features",
                 properties: {name: e.stationId.toString()},
@@ -233,13 +277,17 @@ function displayTimestamp(isoDate) {
     document.getElementById("date").textContent = "⁂ " + isoDate;
 }
 
-function kdTree(stations, depth) {
+/**
+ * Builds a k-d tree from the specified stations using each station's location. Each location should be made
+ * available as an array [x, y, ...], accessible via the key "location".
+ */
+function kdTree(stations, k, depth) {
     if (stations.length == 0) {
         return null;
     }
-    var axis = depth % 2;
+    var axis = depth % k;
     var compareByAxis = function(a, b) {
-        return a.point[axis] - b.point[axis];
+        return a.location[axis] - b.location[axis];
     }
     stations.sort(compareByAxis);
 
@@ -251,14 +299,19 @@ function kdTree(stations, depth) {
         pivot = stations[--median];
     }
 
-    var plane = pivot.point[axis];
+    var plane = pivot.location[axis];
     pivot.planeDistance = function(p) { return plane - p[axis]; };
-    pivot.left = kdTree(stations.slice(0, median), depth + 1);
-    pivot.right = kdTree(stations.slice(median + 1), depth + 1);
+    pivot.left = kdTree(stations.slice(0, median), k, depth + 1);
+    pivot.right = kdTree(stations.slice(median + 1), k, depth + 1);
     return pivot;
 }
 
-function heapify(a, i, key) {
+/**
+ * Given array a, representing a binary heap, this method pushes the key down from the top of the heap. After
+ * invocation, the key having the largest "distance2" value is at the top of the heap.
+ */
+function heapify(a, key) {
+    var i = 0;
     var length = a.length;
     var child;
     while ((child = i * 2 + 1) < length) {
@@ -279,120 +332,123 @@ function heapify(a, i, key) {
 }
 
 /**
- * Returns the square of the distance between the two specified points [x0, y0] and [x1, y1].
+ * Finds the neighbors nearest to the specified point, starting the search at the k-d tree provided as node.
+ * The n closest neighbors are placed in the results array (of length n) in no defined order.
  */
-function distance2(p0, p1) {
-    var Δx = p0[0] - p1[0];
-    var Δy = p0[1] - p1[1];
-    return Δx * Δx + Δy * Δy;
-}
+function nearest(point, node, results) {
+    // This recursive function descends the k-d tree, visiting partitions containing the desired point.
+    // As it descends, it keeps a priority queue of the closest neighbors found. Each visited node is
+    // compared against the worst (i.e., most distant) neighbor in the queue, replacing it if the current
+    // node is closer. The queue is implemented as a binary heap so the worst neighbor is always the
+    // element at the top of the queue.
 
-function nearest(point, node, best) {
+    // Calculate distance of the point to the plane this node uses to split the search space.
     var planeDistance = node.planeDistance(point);
-    var side;
+
+    var containingSide;
     var otherSide;
     if (planeDistance <= 0) {
-        side = node.right;
+        // point is contained in the right partition of the current node.
+        containingSide = node.right;
         otherSide = node.left;
     }
     else {
-        side = node.left;
+        // point is contained in the left partition of the current node.
+        containingSide = node.left;
         otherSide = node.right;
     }
 
-    if (side) {
-        nearest(point, side, best);
+    if (containingSide) {
+        // Search the containing partition for neighbors.
+        nearest(point, containingSide, results);
     }
-    var d2 = distance2(point, node.point);
-    var x = best[0];
-    if (d2 < x.distance2) {
-        x.distance2 = d2;
-        x.station = node;
-        heapify(best, 0, x);
+
+    // Now determine if the current node is a close neighbor. Do the comparison using squared distance so
+    // we don't waste time doing unnecessary sqrt operations.
+    var d2 = distance2(point, node.location);
+    var n = results[0];
+    if (d2 < n.distance2) {
+        // Current node is closer than the worst neighbor encountered so far, so replace it and adjust the queue.
+        n.station = node;
+        n.distance2 = d2;
+        heapify(results, n);
     }
 
     if (otherSide) {
-        if ((planeDistance * planeDistance) < best[0].distance2) {
-            nearest(point, otherSide, best);
+        // The other partition *might* have relevant neighbors if the point is closer to the partition plane
+        // than the worst neighbor encountered so far. Descend down the other side if so.
+        if ((planeDistance * planeDistance) < results[0].distance2) {
+            nearest(point, otherSide, results);
         }
     }
 }
 
-function vectorScale(v, s) {
-    v[0] *= s;
-    v[1] *= s;
-    return v;
-}
+/**
+ * Returns a function that performs inverse distance weighting (en.wikipedia.org/wiki/Inverse_distance_weighting)
+ * interpolation over the specified stations using k closest neighbors. The stations array must be comprised of
+ * elements with the structure {point: [x, y], sample: [vx, vy]}, where sample represents a vector in rectangular form.
+ *
+ * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as result.
+ * After invocation, result holds the interpolated vector vxi, vyi in its 0th and 1st elements, respectively.
+ */
+function idw(stations, k) {
 
-function vectorAdd(a, b) {
-    a[0] = a[0] + b[0];
-    a[1] = a[1] + b[1];
-    return a;
-}
+    var tree = kdTree(stations, 2, 0);
 
-// HACKS
-var temp = [];
-var closest = [];
-for (var i = 0; i < 5; i++) {
-    closest.push({});
-}
-
-function f(x, y, initial, root) {
-    var n = initial;
-    var d = 0;
-    var i;
-    for (i = 0; i < closest.length; i++) {
-        var ee = closest[i];
-        ee.station = null;
-        ee.distance2 = Infinity;
+    // Define special instances for intermediate calculations to avoid unnecessary array allocations.
+    var temp = [];
+    var nearestNeighbors = [];
+    for (var i = 0; i < k; i++) {
+        nearestNeighbors.push({});
     }
 
-    temp[0] = x;
-    temp[1] = y;
-    nearest(temp, root, closest);
-
-    for (i = 0; i < closest.length; i++) {
-        var e = closest[i];
-        var w = 1 / e.distance2;
-        if (w === Infinity) {  // (x, y) is the same point as the sample.
-            return value;
+    function reset() {
+        for (var i = 0; i < k; i++) {
+            var n = nearestNeighbors[i];
+            n.station = null;
+            n.distance2 = Infinity;
         }
-        var sample = e.station.sample;
-        temp[0] = sample[0];  // DOESN'T WORK FOR SCALARS
-        temp[1] = sample[1];
-        var s = vectorScale(temp, w);
-        n = vectorAdd(n, s);
-        d += w;
     }
 
-    return vectorScale(n, 1 / d);
-}
+    return function(x, y, result) {
+        var weightSum = 0;
 
-function randomPoint(field) {
-    var x;
-    var y;
-    var i = 30;
-    do {
-        x = Math.floor(Math.random() * (width - 1));
-        y = Math.floor(Math.random() * (height - 1));
-        if (--i == 0) {  // UNDONE: remove this check. make better.
-            log.debug("hrm");
-            return [Math.floor(width / 2), Math.floor(height / 2)];
+        reset();
+        temp[0] = x;
+        temp[1] = y;
+        nearest(temp, tree, nearestNeighbors);
+
+        for (var i = 0; i < k; i++) {
+            var neighbor = nearestNeighbors[i];
+            var sample = neighbor.station.sample;
+            var d2 = neighbor.distance2;
+            if (d2 === 0) {  // (x, y) is exactly on top of a station.
+                result[0] = sample[0];
+                result[1] = sample[1];
+                return result;
+            }
+            var weight = 1 / d2;
+            temp[0] = sample[0];
+            temp[1] = sample[1];
+            result = addVectors(result, scaleVector(temp, weight));
+            weightSum += weight;
         }
-    } while (!noField && vectorAt(field, x, y) === noVector);
-    return [x, y];
+
+        return scaleVector(result, 1 / weightSum);
+    }
 }
 
-var noVector = [0, 0, -1];
-
-function polarToRectangular(v) {
-    var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
-    var cr = wd_deg / 180 * π;  // convert to cardinal radians
-    var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // wind direction in standard radians
-    var wv = v[1];  // wind velocity
-    var x = Math.cos(wd_rad) * wv;
-    var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space increases downwards
-    return [x, y];
+function buildStations(samples) {
+    var stations = [];
+    samples.forEach(function(sample) {
+        if (sample.wind[0] && sample.wind[1]) {
+            stations.push({
+                location: projection(sample.coordinates),
+                sample: polarToRectangular(sample.wind)
+            });
+        }
+    });
+    return stations;
 }
 
 function interpolateVectorField(displayMaskTask, fieldMaskTask) {
@@ -400,35 +456,26 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
 
     when.all([dataTask, displayMaskTask, fieldMaskTask]).then(function(results) {
         log.time("interpolating field");
-        // Convert cardinal (north origin, clockwise) to radians (counter-clockwise)
-        var samples = results[0];
+        var data = results[0];
         var displayMask = results[1];
         var fieldMask = results[2];
 
-        var date = Object.keys(samples)[0];
+        var date = data[0].date;
         displayTimestamp(date);
 
         if (noField) { d.resolve([]); return d.promise; }
 
-        var stations = [];
-        samples[date].forEach(function(station) {
-            if (station.wind[0] && station.wind[1]) {
-                station.point = projection(station.coordinates);
-                station.sample = polarToRectangular(station.wind);
-                stations.push(station);
-            }
-        });
-
-        var root = kdTree(stations, 0);
+        var stations = buildStations(data[0].samples);
+        var interpolate = idw(stations, 5);  // use the five closest neighbors to interpolate
 
         var field = [];
-        for (var x = 0; x < width; x++) {
+        for (var x = 0; x < view.width; x++) {
             var column = field[x] = [];
-            for (var y = 0; y < height; y++) {
+            for (var y = 0; y < view.height; y++) {
                 var v = noVector;
                 if (fieldMask(x, y)) {
-                    v = f(x, y, [0, 0, 0], root);
-                    v[2] = displayMask(x, y) ? Math.sqrt(v[0]*v[0] + v[1]*v[1]) : -1;
+                    v = interpolate(x, y, [0, 0, 0]);
+                    v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
                 }
                 column[y] = v;
             }
@@ -440,32 +487,42 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
     return d.promise;
 }
 
-function vectorAt(field, x, y) {
-    var column = field[x];
-    if (column) {
-        var v = column[y];
-        if (v) {
-            return v;
-        }
-    }
-    return noVector;
-}
-
 function processVectorField(field) {
     var particles = [];
-    var maxAge = 30;
 
-    for (var i = 0; i < 5000; i++) {
-        var p = randomPoint(field);
-        particles.push({
-            x: p[0],
-            y: p[1],
-            age: Math.floor(Math.random() * maxAge),
-            fx: 0,
-            fy: 0,
-            fxt: 0,
-            fyt: 0
-        });
+    function vectorAt(x, y) {
+        var column = field[x];
+        if (column) {
+            var v = column[y];
+            if (v) {
+                return v;
+            }
+        }
+        return noVector;
+    }
+
+    function randomize(particle) {
+        var x;
+        var y;
+        var i = 30;
+        do {
+            x = Math.floor(Math.random() * (view.width - 1));
+            y = Math.floor(Math.random() * (view.height - 1));
+            if (--i == 0) {  // UNDONE: ugh. remove this check. make better.
+                log.debug("hrm");
+                x = Math.floor(view.width / 2);
+                y = Math.floor(view.height / 2);
+                break;
+            }
+        } while (!noField && vectorAt(x, y) === noVector);
+        particle.x = x;
+        particle.y = y;
+    }
+
+    for (var i = 0; i < particleCount; i++) {
+        var particle = {age: Math.floor(Math.random() * particleMaxAge)};
+        randomize(particle);
+        particles.push(particle);
     }
 
     var styles = [];
@@ -475,6 +532,9 @@ function processVectorField(field) {
     var max = 17;
     var min = 0;
     var range = max - min;
+
+    var c = fieldCanvas;
+    var g = c.getContext("2d");
 
     draw();
 
@@ -494,11 +554,9 @@ function processVectorField(field) {
         }
 
         particles.forEach(function(particle) {
-            if (particle.age > maxAge) {
+            if (particle.age > particleMaxAge) {
+                randomize(particle);
                 particle.age = 0;
-                var p = randomPoint(field);
-                particle.x = p[0];
-                particle.y = p[1];
             }
 
             // get vector at current location
@@ -507,7 +565,7 @@ function processVectorField(field) {
             var fx = Math.round(x);
             var fy = Math.round(y);
 
-            var v = vectorAt(field, fx, fy);
+            var v = vectorAt(fx, fy);
             if (v !== noVector) {
                 var xt = x + v[0];
                 var yt = y + v[1];
@@ -515,7 +573,7 @@ function processVectorField(field) {
                 var fyt = Math.round(yt);
                 var m = v[2];
 
-                if (m >= 0 && vectorAt(field, fxt, fyt)[2] >= 0) {
+                if (m >= 0 && vectorAt(fxt, fyt)[2] >= 0) {
                     var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
                     particle.fx = fx;
                     particle.fy = fy;
@@ -544,7 +602,7 @@ function processVectorField(field) {
         });
 
         if (!done) {
-            setTimeout(draw, 35);
+            setTimeout(draw, frameRate);
         }
     }
 }

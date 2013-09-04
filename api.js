@@ -186,12 +186,21 @@ function process(res, constraints) {
     db.execute(stmt).then(buildResponse).then(null, handleUnexpected.bind(null, res));
 
     function buildResponse(result) {
-        var data = {};
+        // Build JSON response like this:
+        //  [
+        //    {
+        //      "date": "2013-09-04 16:00:00+09:00",
+        //      "samples": [ {"stationId": "101", "coordinates": [139.768119, 35.692752], "wind": [90, 0.6]}, ... ]
+        //    },
+        //    ...
+        //  ]
+
+        var buckets = {};  // collect rows having common dates into buckets
         result.rows.forEach(function(row) {
             var date = row.date + ":00";
-            var bucket = data[date];
+            var bucket = buckets[date];
             if (!bucket) {
-                data[date] = bucket = [];
+                buckets[date] = bucket = [];
             }
             if (!row.wd || !row.wv) {
                 return;
@@ -201,6 +210,11 @@ function process(res, constraints) {
                 coordinates: [asNullOrNumber(row.longitude), asNullOrNumber(row.latitude)],
                 wind: [asNullOrNumber(row.wd), asNullOrNumber(row.wv)]
             });
+        });
+
+        var data = [];
+        Object.keys(buckets).forEach(function(date) {
+            data.push({date: date, samples: buckets[date]});
         });
         res.json(data);
     }
