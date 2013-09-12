@@ -3,12 +3,13 @@
 var noField = false;
 var π = Math.PI;
 var noVector = [0, 0, -1];
-var projection;  // ugh. global to this script, but assigned asynchronously
+var projection;
 var bbox;
 var particleCount = 5000;
 var particleMaxAge = 40;
-var frameRate = 32; // one frame per this many milliseconds
+var frameRate = 40; // one frame per this many milliseconds
 var done = false;
+var pixelsPerUnitVelocity = 0.35;
 
 /**
  * An object to perform cross-browser logging.
@@ -17,7 +18,7 @@ var log = function() {
     return {
         debug:   function(s) { console.log(s); },
         info:    function(s) { console.info(s); },
-        error:   function(e) { console.error(e.stack ? e.stack : e); },
+        error:   function(e) { console.error(e.stack ? e + "\n" + e.stack : e); },
         time:    function(s) { console.time(s); },
         timeEnd: function(s) { console.timeEnd(s); }
     };
@@ -40,18 +41,18 @@ d3.select("#field-canvas").on("click", displayCoordinates);
 
 //var resource = "samples/2013/8/24/16"
 //var resource = "samples/2013/8/21/15"
-//var resource = "samples/2013/8/20/22"
-//var resource = "samples/2013/8/20/20"
-//var resource = "samples/2013/8/20/18"
+//var resource = "samples/2013/8/20/22"  // nice arc
 //var resource = "samples/2013/8/18/17"  // strong northerly wind
 //var resource = "samples/2013/8/16/15"
 //var resource = "samples/2013/8/12/19"  // max wind at one station
 //var resource = "samples/2013/8/27/12"  // gentle breeze
-//var resource = "samples/2013/8/26/29"
 //var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
 //var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
 //var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
 //var resource = "samples/2013/9/4/23"  // odd interpolation
+//var resource = "samples/2013/9/8/16"
+//var resource = "samples/2013/9/5/2"
+//var resource = "samples/2013/9/4/14"  // really windy
 var resource = "samples/current";
 
 var topoTask = loadJson("tokyo-topo.json");
@@ -68,7 +69,7 @@ function formatCoordinates(lng, lat) {
 }
 
 /**
- * Multiply the vector v (in rectangular [x, y] form) by the scalar s and return it.
+ * Multiply the vector v (in rectangular [x, y] form) by the scalar s, in place, and return it.
  */
 function scaleVector(v, s) {
     v[0] *= s;
@@ -95,7 +96,7 @@ function distance2(p0, p1) {
 }
 
 /**
- * Converts an into-the-wind polar vector with cardinal degrees to a with-the-wind rectangular vector
+ * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector
  * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
  * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
  * would point _to_ the SE (assuming the top of the display represents North).
@@ -291,25 +292,28 @@ function kdTree(stations, k, depth) {
     if (stations.length == 0) {
         return null;
     }
-    var axis = depth % k;
+    var axis = depth % k;  // cycle through each axis as we descend downwards
     var compareByAxis = function(a, b) {
         return a.location[axis] - b.location[axis];
     }
     stations.sort(compareByAxis);
 
-    // Pivot where all stations to the left are _strictly smaller_ than the median.
+    // Pivot on the median station with the policy that all stations to the left _strictly smaller_.
     var median = Math.floor(stations.length / 2);
-    var pivot = stations[median];
-    // Scan backwards for stations aligned on the same axis. We want to be at the beginning of any such sequence.
-    while (median > 0 && compareByAxis(pivot, stations[median - 1]) === 0) {
-        pivot = stations[--median];
+    var node = stations[median];
+    // Scan backwards for stations aligned on the same axis. We must be at the beginning of any such sequence of dups.
+    while (median > 0 && compareByAxis(node, stations[median - 1]) === 0) {
+        node = stations[--median];
     }
 
-    var plane = pivot.location[axis];
-    pivot.planeDistance = function(p) { return plane - p[axis]; };
-    pivot.left = kdTree(stations.slice(0, median), k, depth + 1);
-    pivot.right = kdTree(stations.slice(median + 1), k, depth + 1);
-    return pivot;
+    node.left = kdTree(stations.slice(0, median), k, depth + 1);
+    node.right = kdTree(stations.slice(median + 1), k, depth + 1);
+
+    // Provide a function that easily calculates a point's distance to the partitioning plane of this node.
+    var plane = node.location[axis];
+    node.planeDistance = function(p) { return plane - p[axis]; };
+
+    return node;
 }
 
 /**
@@ -369,8 +373,8 @@ function nearest(point, node, results) {
         nearest(point, containingSide, results);
     }
 
-    // Now determine if the current node is a close neighbor. Do the comparison using squared distance so
-    // we don't waste time doing unnecessary sqrt operations.
+    // Now determine if the current node is a close neighbor. Do the comparison using _squared_ distance so
+    // we don't waste time doing unnecessary Math.sqrt operations.
     var d2 = distance2(point, node.location);
     var n = results[0];
     if (d2 < n.distance2) {
@@ -399,16 +403,17 @@ function nearest(point, node, results) {
  */
 function idw(stations, k) {
 
+    // Build a space partitioning tree to use for quick lookup of closest neighbors.
     var tree = kdTree(stations, 2, 0);
 
-    // Define special instances for intermediate calculations to avoid unnecessary array allocations.
+    // Define special scratch objects for intermediate calculations to avoid unnecessary array allocations.
     var temp = [];
     var nearestNeighbors = [];
     for (var i = 0; i < k; i++) {
         nearestNeighbors.push({});
     }
 
-    function reset() {
+    function clear() {
         for (var i = 0; i < k; i++) {
             var n = nearestNeighbors[i];
             n.station = null;
@@ -416,14 +421,17 @@ function idw(stations, k) {
         }
     }
 
+    // Return a function that interpolates a vector for the point (x, y) and stores it in "result".
     return function(x, y, result) {
         var weightSum = 0;
 
-        reset();
+        clear();  // reset our scratch objects
         temp[0] = x;
         temp[1] = y;
-        nearest(temp, tree, nearestNeighbors);
 
+        nearest(temp, tree, nearestNeighbors);  // calculate nearest neighbors
+
+        // Sum up the values at each nearest neighbor, adjusted by the inverse square of the distance.
         for (var i = 0; i < k; i++) {
             var neighbor = nearestNeighbors[i];
             var sample = neighbor.station.sample;
@@ -440,6 +448,7 @@ function idw(stations, k) {
             weightSum += weight;
         }
 
+        // Divide by the total weight to calculate an average, which is our interpolated result.
         return scaleVector(result, 1 / weightSum);
     }
 }
@@ -481,6 +490,7 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
                 var v = noVector;
                 if (fieldMask(x, y)) {
                     v = interpolate(x, y, [0, 0, 0]);
+                    v = scaleVector(v, pixelsPerUnitVelocity)
                     v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
                 }
                 column[y] = v;
@@ -534,7 +544,7 @@ function processVectorField(field) {
     }
 
     var styles = [];
-    for (var j = 75; j <= 255; j += 6) {
+    for (var j = 85; j <= 255; j += 5) {
         styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
     }
     var max = 17;
@@ -549,7 +559,7 @@ function processVectorField(field) {
 
     function draw() {
         var prev = g.globalCompositeOperation;
-        g.fillStyle = "rgba(0, 0, 0, 0.93)";
+        g.fillStyle = "rgba(0, 0, 0, 0.97)";
         g.globalCompositeOperation = "destination-in";
         g.fillRect(bbox[0][0], bbox[0][1], width, height);
         g.globalCompositeOperation = prev;
@@ -599,8 +609,6 @@ function processVectorField(field) {
                 g.beginPath();
                 g.strokeStyle = styles[i];
                 bucket.forEach(function(particle) {
-//                    g.fillStyle = styles[i]; //"rgba(255, 255, 255, 1)";
-//                    g.fillRect(particle.fxt, particle.fyt, 1, 1);
                     g.moveTo(particle.x, particle.y);
                     g.lineTo(particle.xt, particle.yt);
                     particle.x = particle.xt;
