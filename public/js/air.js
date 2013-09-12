@@ -7,7 +7,7 @@ var projection;
 var bbox;
 var particleCount = 5000;
 var particleMaxAge = 40;
-var frameRate = 40; // one frame per this many milliseconds
+var frameRate = 50; // one frame per this many milliseconds
 var done = false;
 var pixelsPerUnitVelocity = 0.35;
 
@@ -199,7 +199,7 @@ function plotCurrentPosition(svg, projection) {
                 var x = Math.round(p[0]);
                 var y = Math.round(p[1]);
                 if (0 <= x && x < view.width && 0 <= y && y < view.height) {
-                    svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "pos");
+                    svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "position");
                 }
             },
             log.error,
@@ -225,11 +225,11 @@ function doProcess(topo) {
     log.time("rendering map");
     mapSvg.append("path")
         .datum(outerBoundary)
-        .attr("class", "tk-outboundary")
+        .attr("class", "out-boundary")
         .attr("d", path);
     mapSvg.append("path")
         .datum(divisionBoundaries)
-        .attr("class", "tk-inboundary")
+        .attr("class", "in-boundary")
         .attr("d", path);
     log.timeEnd("rendering map");
 
@@ -248,7 +248,7 @@ function doProcess(topo) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", "30")  // FF does NOT like a large number here--even canvg is slow
+                .attr("stroke-width", 30)// UNDONE: FF does NOT like a large number here--even canvg is slow
                 .attr("stroke", "#fff")  // Also, the stroke-width should scale with canvas size
                 .attr("d", path);
         }));
@@ -484,20 +484,33 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
         var interpolate = idw(stations, 5);  // use the five closest neighbors to interpolate
 
         var field = [];
-        for (var x = 0; x < view.width; x++) {
-            var column = field[x] = [];
-            for (var y = 0; y < view.height; y++) {
-                var v = noVector;
-                if (fieldMask(x, y)) {
-                    v = interpolate(x, y, [0, 0, 0]);
-                    v = scaleVector(v, pixelsPerUnitVelocity)
-                    v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
+        var x = 0;
+
+        (function batchInterpolate() {
+            var start = +new Date;
+            while (x < view.width) {
+                var column = field[x] = [];
+                for (var y = 0; y < view.height; y++) {
+                    var v = noVector;
+                    if (fieldMask(x, y)) {
+                        v = [0, 0, 0];
+                        v = interpolate(x, y, v);
+                        v = scaleVector(v, pixelsPerUnitVelocity)
+                        v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
+                    }
+                    column[y] = v;
                 }
-                column[y] = v;
+                x++;
+
+                if ((+new Date - start) > 100) {
+                    setTimeout(batchInterpolate, 25);
+                    return;
+                }
             }
-        }
-        d.resolve(field);
-        log.timeEnd("interpolating field");
+            d.resolve(field);
+            log.timeEnd("interpolating field");
+        })();
+
     }).then(null, log.error);
 
     return d.promise;
@@ -555,9 +568,8 @@ function processVectorField(field) {
     var g = c.getContext("2d");
     g.lineWidth = 0.75;
 
-    draw();
-
-    function draw() {
+    (function draw() {
+//        var start = +new Date;
         var prev = g.globalCompositeOperation;
         g.fillStyle = "rgba(0, 0, 0, 0.97)";
         g.globalCompositeOperation = "destination-in";
@@ -619,7 +631,9 @@ function processVectorField(field) {
         });
 
         if (!done) {
+//            var d = (+new Date - start);
+//            var next = Math.max(17, frameRate - d);
             setTimeout(draw, frameRate);
         }
-    }
+    })();
 }
