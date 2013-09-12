@@ -1,15 +1,15 @@
 "use strict";
 
-var noField = false;
 var π = Math.PI;
 var noVector = [0, 0, -1];
 var projection;
 var bbox;
 var particleCount = 5000;
 var particleMaxAge = 40;
-var frameRate = 50; // one frame per this many milliseconds
+var frameRate = 40; // one frame per this many milliseconds
 var done = false;
-var pixelsPerUnitVelocity = 0.35;
+var pixelsPerUnitVelocity = 1.00;
+var fadeFillStyle = "rgba(0, 0, 0, 0.97)";
 
 /**
  * An object to perform cross-browser logging.
@@ -37,7 +37,7 @@ var view = function() {
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
 
-d3.select("#field-canvas").on("click", displayCoordinates);
+d3.select("#field-canvas").on("click", mouseClick);
 
 //var resource = "samples/2013/8/24/16"
 //var resource = "samples/2013/8/21/15"
@@ -99,7 +99,7 @@ function distance2(p0, p1) {
  * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector
  * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
  * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
- * would point _to_ the SE (assuming the top of the display represents North).
+ * would point _to_ the SE (lower right).
  */
 function polarToRectangular(v) {
     var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
@@ -153,7 +153,6 @@ function loadJson(resource) {
 }
 
 function masker(renderTask) {
-    if (noField) return when.resolve("no");
     return renderTask.then(function(canvas) {
         var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
         var width = canvas.width;
@@ -166,8 +165,6 @@ function masker(renderTask) {
 
 function render(width, height, appendTo) {
     var d = when.defer();
-
-    if (noField) { d.resolve("no"); return d.promise; }
 
     setTimeout(function() {
         log.time("rendering canvas");
@@ -248,8 +245,8 @@ function doProcess(topo) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", 30)// UNDONE: FF does NOT like a large number here--even canvg is slow
-                .attr("stroke", "#fff")  // Also, the stroke-width should scale with canvas size
+                .attr("stroke-width", 50) // UNDONE: FF does NOT like a large number here--even canvg is slow
+                .attr("stroke", "#fff")   // Also, the stroke-width should scale with canvas size
                 .attr("d", path);
         }));
 
@@ -274,9 +271,12 @@ function doProcess(topo) {
         .then(null, log.error);
 }
 
-function displayCoordinates() {
-    var c = projection.invert(d3.mouse(this));
+function displayCoordinates(c) {
     document.getElementById("location").textContent = "⁂ " + formatCoordinates(c[0], c[1]);
+}
+
+function mouseClick() {
+    displayCoordinates(projection.invert(d3.mouse(this)));
     done = true;
 }
 
@@ -298,7 +298,7 @@ function kdTree(stations, k, depth) {
     }
     stations.sort(compareByAxis);
 
-    // Pivot on the median station with the policy that all stations to the left _strictly smaller_.
+    // Pivot on the median station using the policy that all stations to the left must be _strictly smaller_.
     var median = Math.floor(stations.length / 2);
     var node = stations[median];
     // Scan backwards for stations aligned on the same axis. We must be at the beginning of any such sequence of dups.
@@ -478,8 +478,6 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
         var date = data[0].date;
         displayTimestamp(date);
 
-        if (noField) { d.resolve([]); return d.promise; }
-
         var stations = buildStations(data[0].samples);
         var interpolate = idw(stations, 5);  // use the five closest neighbors to interpolate
 
@@ -539,13 +537,12 @@ function processVectorField(field) {
         do {
             x = Math.random() * width + bbox[0][0];
             y = Math.random() * height + bbox[0][1];
-            if (--i == 0) {  // UNDONE: ugh. remove this check. make better. somehow.
-                log.debug("hrm");
+            if (--i == 0) {  // UNDONE: ugh. remove this safety net. make better. somehow.
                 x = width / 2;
                 y = height / 2;
                 break;
             }
-        } while (!noField && vectorAt(x, y) === noVector);
+        } while (vectorAt(x, y) === noVector);
         particle.x = x;
         particle.y = y;
     }
@@ -569,14 +566,13 @@ function processVectorField(field) {
     g.lineWidth = 0.75;
 
     (function draw() {
-//        var start = +new Date;
+        var start = +new Date;
+
         var prev = g.globalCompositeOperation;
-        g.fillStyle = "rgba(0, 0, 0, 0.97)";
+        g.fillStyle = fadeFillStyle;
         g.globalCompositeOperation = "destination-in";
         g.fillRect(bbox[0][0], bbox[0][1], width, height);
         g.globalCompositeOperation = prev;
-
-        if (noField) return;
 
         var buckets = [];
         for (var i = 0; i < styles.length; i++) {
@@ -631,9 +627,9 @@ function processVectorField(field) {
         });
 
         if (!done) {
-//            var d = (+new Date - start);
-//            var next = Math.max(17, frameRate - d);
-            setTimeout(draw, frameRate);
+            var d = (+new Date - start);
+            var next = Math.max(frameRate, frameRate - d);
+            setTimeout(draw, next);
         }
     })();
 }

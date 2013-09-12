@@ -8,19 +8,19 @@ html, body, div, span, h1, h2, h3, h4, h5, h6, p, a {
     padding: 0;
     border: 0;
     vertical-align: baseline;
+    font: 1em mplus-2p-thin,Helvetica,arial,freesans,clean,sans-serif;
 }
 
 body {
     background: #202020;
     overflow-x: hidden;
     line-height: 0;
-    font: 32px mplus-2p-thin,Helvetica,arial,freesans,clean,sans-serif;
-    color: #fff;
+    color: #eee;
 }
 
 .out-boundary {
     fill: #303030;
-    stroke: #a0a0a0;
+    stroke: #c0c0c0;
     stroke-width: 1;
     stroke-linejoin: round;
 }
@@ -62,6 +62,19 @@ body {
     left: 2%;
 }
 
-.smallprint {
-    font-size: 14px;
+h1 {
+    font-size: 2.7em;
+}
+
+h2 {
+    font-size: 2.7em;
+}
+
+a {
+    color: #888;
+}
+
+a:hover {
+    color: #fff;
+    transition: color 125ms ease-in;
 }
