@@ -285,7 +285,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === "string" ? statement : statement.sql;
         var args = typeof statement === "string" ? [] : (statement.args || []);
 
-//        console.log(sql + (args.length > 0 ? "; " + args : ""));
+        console.log(sql + (args.length > 0 ? "; " + args : ""));
 
         client.query(sql, args, function(error, result) {
             done();

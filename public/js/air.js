@@ -1,15 +1,16 @@
 "use strict";
 
 var π = Math.PI;
-var noVector = [0, 0, -1];
-var projection;
-var bbox;
 var particleCount = 5000;
 var particleMaxAge = 40;
 var frameRate = 40; // one frame per this many milliseconds
 var done = false;
 var pixelsPerUnitVelocity = 1.00;
 var fadeFillStyle = "rgba(0, 0, 0, 0.97)";
+
+var noVector = [0, 0, -1];
+var projection;
+var bbox;
 
 /**
  * An object to perform cross-browser logging.
@@ -36,8 +37,6 @@ var view = function() {
 
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-
-d3.select("#field-canvas").on("click", mouseClick);
 
 //var resource = "samples/2013/8/24/16"
 //var resource = "samples/2013/8/21/15"
@@ -66,6 +65,16 @@ topoTask.then(doProcess).then(null, log.error);
 function formatCoordinates(lng, lat) {
     return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
            Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+}
+
+/**
+ * Returns a human readable string for the provided rectangular wind vector.
+ */
+function formatVector(x, y) {
+    var d = Math.atan2(-x, y) / π * 180;  // calculate into-the-wind cardinal degrees
+    var wd = Math.round((d + 360) % 360 / 5) * 5;  // shift [-180, 180] to [0, 360], and round to nearest 5.
+    var m = Math.sqrt(x * x + y * y);
+    return wd.toFixed(0) + " @ " + m.toFixed(1) + " m/s";
 }
 
 /**
@@ -275,9 +284,8 @@ function displayCoordinates(c) {
     document.getElementById("location").textContent = "⁂ " + formatCoordinates(c[0], c[1]);
 }
 
-function mouseClick() {
-    displayCoordinates(projection.invert(d3.mouse(this)));
-    done = true;
+function displayVectorDetails(v) {
+    document.getElementById("wind").textContent = "⁂ " + formatVector(v[0], v[1]);
 }
 
 function displayTimestamp(isoDate) {
@@ -518,6 +526,21 @@ function processVectorField(field) {
     var particles = [];
     var width = bbox[1][0] - bbox[0][0] + 1;
     var height = bbox[1][1] - bbox[0][1] + 1;
+
+    d3.select("#field-canvas").on("click", mouseClick);
+
+    function mouseClick() {
+        var p = d3.mouse(this);
+        var c = projection.invert(p);
+        var v = vectorAt(p[0], p[1]);
+        if (v[2] === -1) {
+            done = true;
+        }
+        else {
+            displayCoordinates(c);
+            displayVectorDetails(v);
+        }
+    }
 
     function vectorAt(x, y) {
         var column = field[Math.round(x)];

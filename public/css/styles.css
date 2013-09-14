@@ -62,12 +62,8 @@ body {
     left: 2%;
 }
 
-h1 {
-    font-size: 2.7em;
-}
-
-h2 {
-    font-size: 2.7em;
+h1, h2 {
+    font-size: 2.5em;
 }
 
 a {

@@ -160,6 +160,15 @@ app.use(express.compress());
 //        });
 //});
 
+function handleUnexpected(res, error) {
+    console.error(error);
+    console.error(error.stack);
+    res.send(500);
+}
+
+/**
+ * Returns i as an integer if it matches the regex and lies in the range [from, to], otherwise NaN.
+ */
 function validate(i, regex, from, to) {
     if (!regex.test(i)) {
         return NaN;
@@ -171,53 +180,70 @@ function validate(i, regex, from, to) {
     return result;
 }
 
-function handleUnexpected(res, error) {
-    console.error(error);
-    console.error(error.stack);
-    res.send(500);
-}
-
+/**
+ * Casts v to a Number if it is truthy, otherwise null.
+ */
 function asNullOrNumber(v) {
     return v ? +v : null;
 }
 
-function process(res, constraints) {
+function buildResponse(rows) {
+    // Build JSON response like this:
+    //  [
+    //    {
+    //      "date": "2013-09-04 16:00:00+09:00",
+    //      "samples": [ {"stationId": "101", "coordinates": [139.768119, 35.692752], "wind": [90, 0.6]}, ... ]
+    //    },
+    //    ...
+    //  ]
+
+    var buckets = {};  // collect rows having common dates into buckets
+    rows.rows.forEach(function(row) {
+        var date = row.date + ":00";
+        var bucket = buckets[date];
+        if (!bucket) {
+            buckets[date] = bucket = [];
+        }
+        if (!row.wd || !row.wv) {
+            return;
+        }
+        bucket.push({
+            stationId: row.stationId.toString(),
+            coordinates: [asNullOrNumber(row.longitude), asNullOrNumber(row.latitude)],
+            wind: [asNullOrNumber(row.wd), asNullOrNumber(row.wv)]
+        });
+    });
+
+    var result = [];
+    Object.keys(buckets).forEach(function(date) {
+        result.push({date: date, samples: buckets[date]});
+    });
+    return JSON.stringify(result);
+}
+
+function query(constraints) {
     var stmt = db.selectSamplesCompact(constraints, ["date", "stationId", "longitude", "latitude", "wv", "wd"]);
-    db.execute(stmt).then(buildResponse).then(null, handleUnexpected.bind(null, res));
+    return db.execute(stmt).then(buildResponse);
+}
 
-    function buildResponse(result) {
-        // Build JSON response like this:
-        //  [
-        //    {
-        //      "date": "2013-09-04 16:00:00+09:00",
-        //      "samples": [ {"stationId": "101", "coordinates": [139.768119, 35.692752], "wind": [90, 0.6]}, ... ]
-        //    },
-        //    ...
-        //  ]
+var memos = {};
 
-        var buckets = {};  // collect rows having common dates into buckets
-        result.rows.forEach(function(row) {
-            var date = row.date + ":00";
-            var bucket = buckets[date];
-            if (!bucket) {
-                buckets[date] = bucket = [];
-            }
-            if (!row.wd || !row.wv) {
-                return;
-            }
-            bucket.push({
-                stationId: row.stationId.toString(),
-                coordinates: [asNullOrNumber(row.longitude), asNullOrNumber(row.latitude)],
-                wind: [asNullOrNumber(row.wd), asNullOrNumber(row.wv)]
-            });
-        });
+function process(res, constraints) {
+    var key = JSON.stringify(constraints);
+    var queryTask = _.has(memos, key) ?
+        memos[key] :
+        (memos[key] = query(constraints));
 
-        var data = [];
-        Object.keys(buckets).forEach(function(date) {
-            data.push({date: date, samples: buckets[date]});
-        });
-        res.json(data);
+    function sendResponse(data) {
+        res.set("Content-Type", "application/json");
+        res.send(data);
     }
+
+    return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
+}
+
+exports.reset = function() {
+    memos = {};
 }
 
 app.get("/samples/current", function(req, res) {
