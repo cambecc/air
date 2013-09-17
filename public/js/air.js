@@ -13,15 +13,15 @@ var projection;
 var bbox;
 
 /**
- * An object to perform cross-browser logging.
+ * An object to handle logging if browser supports it.
  */
 var log = function() {
     return {
-        debug:   function(s) { console.log(s); },
-        info:    function(s) { console.info(s); },
-        error:   function(e) { console.error(e.stack ? e + "\n" + e.stack : e); },
-        time:    function(s) { console.time(s); },
-        timeEnd: function(s) { console.timeEnd(s); }
+        debug:   function(s) { if (console && console.log) console.log(s); },
+        info:    function(s) { if (console && console.info) console.info(s); },
+        error:   function(e) { if (console && console.error) console.error(e.stack ? e + "\n" + e.stack : e); },
+        time:    function(s) { if (console && console.time) console.time(s); },
+        timeEnd: function(s) { if (console && console.timeEnd) console.timeEnd(s); }
     };
 }();
 
@@ -35,6 +35,7 @@ var view = function() {
     return {width: x, height: y};
 }();
 
+var displayDiv = document.getElementById("display");
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
 
@@ -52,10 +53,11 @@ var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("hei
 //var resource = "samples/2013/9/8/16"
 //var resource = "samples/2013/9/5/2"
 //var resource = "samples/2013/9/4/14"  // really windy
-var resource = "samples/current";
+//var resource = "samples/2013/9/17/09"  // another spiral after typhoon
+//var resource = "samples/current";
 
-var topoTask = loadJson("tokyo-topo.json");
-var dataTask = loadJson(resource);
+var topoTask = loadJson(displayDiv.dataset.topography);
+var dataTask = loadJson(displayDiv.dataset.samples);
 
 topoTask.then(doProcess).then(null, log.error);
 
@@ -223,8 +225,8 @@ function doProcess(topo) {
     bbox = [ur.map(Math.floor), ll.map(Math.ceil)];
 
     var path = d3.geo.path().projection(projection);
-    var outerBoundary = topojson.mesh(topo, topo.objects.tk, function(a, b) { return a === b; });
-    var divisionBoundaries = topojson.mesh(topo, topo.objects.tk, function (a, b) { return a !== b; });
+    var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
+    var divisionBoundaries = topojson.mesh(topo, topo.objects.main, function (a, b) { return a !== b; });
 
     log.timeEnd("building meshes");
 

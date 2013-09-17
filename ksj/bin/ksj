@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 
-// ./ksj -c ../../scratch/N03-110331_13.xml tokyo-raw.json
-// ./ksj -t ./tokyo-raw.json tokyo-geo.json
-// topojson --bbox -o tokyo-topo.json tokyo-geo.json
+// ./ksj -c ../../scratch/N03-110331_13.xml ../../scratch/tokyo-raw.json
+// ./ksj -t ../../scratch/tokyo-raw.json ../../scratch/main.json
+// topojson --bbox -o ../../scratch/tokyo-topo.json ../../scratch/main.json
+// cp ../../scratch/tokyo-topo.json ../../public
 
 var fs = require("fs");
 var when = require("when");

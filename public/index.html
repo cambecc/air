@@ -2,16 +2,14 @@
 <html>
 <head>
     <meta charset="utf-8"/>
-    <title>Tokyo Air</title>
-    <meta name="title" content="Tokyo Air">
-    <meta name="description" content="Tokyo Air">
-    <meta name="keywords" content="tokyo, air">
     <meta name="author" content="Cameron Beccario">
-    <link rel="stylesheet" type="text/css" href="css/styles.css"/>
+    <meta name="description" content="Tokyo Air">
+    <link rel="stylesheet" type="text/css" href="/css/styles.css"/>
+    <title>Tokyo Air</title>
 </head>
 <body>
 
-    <div id="display">
+    <div id="display" data-topography="/tokyo-topo.json" data-samples="/samples/current">
         <div id="map">
             <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
         </div>
@@ -46,11 +44,11 @@
         <p>&nbsp;</p>
     </div>
 
-    <script src="js/when.js" charset="utf-8" type="text/javascript"></script>
-    <script src="js/d3.v3.js" charset="utf-8" type="text/javascript"></script>
-    <script src="js/canvg.js" charset="utf-8" type="text/javascript"></script>
-    <script src="js/topojson.v1.js" charset="utf-8" type="text/javascript"></script>
-    <script src="js/air.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/when.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/d3.v3.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/canvg.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/topojson.v1.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/air.js" charset="utf-8" type="text/javascript"></script>
 
 </body>
 </html>
