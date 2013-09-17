@@ -13,7 +13,7 @@ var stationsData = require("./station-data");
 var iconvShiftJIStoUTF8 = new (require("iconv")).Iconv("SHIFT_JIS", "UTF-8//TRANSLIT//IGNORE");
 var shiftJIStoUTF8 = iconvShiftJIStoUTF8.convert.bind(iconvShiftJIStoUTF8);
 
-var scrapeURL = process.argv[3];
+var scrapeURL = process.argv[4];
 var stationNames = {};
 
 function extractP160DateTime(dom) {

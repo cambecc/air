@@ -7,7 +7,7 @@ var when = require("when");
 var pg = require("pg");
 var schema = require("./schema");
 
-var connectionString = process.argv[2];  // for example: "postgres://postgres:12345@localhost:5432/air"
+var connectionString = process.argv[3];  // for example: "postgres://postgres:12345@localhost:5432/air"
 var labels = ["year", "month", "day", "hour", "minute", "second"];
 
 /**

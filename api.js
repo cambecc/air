@@ -8,6 +8,7 @@ var when = require("when");
 var db = require("./db");
 var tool = require("./tool");
 
+var port = process.argv[2];
 var indexHTML = fs.readFileSync("./public/index.html", {encoding: "utf-8"});
 var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-samples="/samples/current"' in index.html
 
@@ -245,18 +246,18 @@ function buildResponse(rows) {
     return JSON.stringify(result);
 }
 
-function query(constraints) {
+function doQuery(constraints) {
     var stmt = db.selectSamplesCompact(constraints, ["date", "stationId", "longitude", "latitude", "wv", "wd"]);
     return db.execute(stmt).then(buildResponse);
 }
 
 var memos = {};
 
-function process(res, constraints) {
+function query(res, constraints) {
     var key = JSON.stringify(constraints);
     var queryTask = _.has(memos, key) ?
         memos[key] :
-        (memos[key] = query(constraints));
+        (memos[key] = doQuery(constraints));
 
     function sendResponse(data) {
         res.set("Content-Type", "application/json");
@@ -272,7 +273,7 @@ exports.reset = function() {
 
 app.get("/samples/current", function(req, res) {
     try {
-        process(res, {date: {current: true, parts: [], zone: "+09:00"}});
+        query(res, {date: {current: true, parts: [], zone: "+09:00"}});
     }
     catch (error) {
         handleUnexpected(res, error);
@@ -285,7 +286,7 @@ app.get("/samples/:year/:month/:day/:hour", function(req, res) {
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
-        process(res, {date: {current: false, parts: parts, zone: "+09:00"}});
+        query(res, {date: {current: false, parts: parts, zone: "+09:00"}});
     }
     catch (error) {
         handleUnexpected(res, error);
@@ -316,5 +317,5 @@ app.get("/map/:year/:month/:day/:hour", function(req, res) {
 
 app.use(express.static(__dirname + "/public"));
 
-app.listen(3000);
-console.log("Listening on port 3000...");
+app.listen(port);
+console.log(tool.format("Listening on port {0}...", port));
