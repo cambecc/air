@@ -1,7 +1,8 @@
 {
-    "name": "AIR",
-    "description": "Tokyo Air Quality",
+    "name": "TokyoAir",
+    "description": "Tokyo Air",
     "version": "0.0.1",
+    "private": true,
     "author": {
         "name": "Cameron Beccario",
         "email": "cambecc@nullschool.net"
@@ -21,5 +22,8 @@
     },
     "devDependencies": {
         "nodeunit": "nodeunit-0.8.1"
+    },
+    "scripts": {
+        "start": "node server.js"
     }
 }
