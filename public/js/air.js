@@ -38,24 +38,6 @@ var view = function() {
 var displayDiv = document.getElementById("display");
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-
-//var resource = "samples/2013/8/24/16"
-//var resource = "samples/2013/8/21/15"
-//var resource = "samples/2013/8/20/22"  // nice arc
-//var resource = "samples/2013/8/18/17"  // strong northerly wind
-//var resource = "samples/2013/8/16/15"
-//var resource = "samples/2013/8/12/19"  // max wind at one station
-//var resource = "samples/2013/8/27/12"  // gentle breeze
-//var resource = "samples/2013/8/30/11" // wind reversal in west, but IDW doesn't see it
-//var resource = "samples/2013/9/1/17"  // spiral over tokyo -- moved
-//var resource = "samples/2013/9/1/16"  // spiral over tokyo ++
-//var resource = "samples/2013/9/4/23"  // odd interpolation
-//var resource = "samples/2013/9/8/16"
-//var resource = "samples/2013/9/5/2"
-//var resource = "samples/2013/9/4/14"  // really windy
-//var resource = "samples/2013/9/17/09"  // another spiral after typhoon
-//var resource = "samples/current";
-
 var topoTask = loadJson(displayDiv.dataset.topography);
 var dataTask = loadJson(displayDiv.dataset.samples);
 

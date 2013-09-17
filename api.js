@@ -1,17 +1,20 @@
 "use strict";
 
 var util = require("util");
-var express = require("express");
-var db = require("./db");
-var when = require("when");
+var fs = require("fs");
 var _ = require("underscore");
+var express = require("express");
+var when = require("when");
+var db = require("./db");
 var tool = require("./tool");
-// var schema = require("./schema");
+
+var indexHTML = fs.readFileSync("./public/index.html", {encoding: "utf-8"});
+var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-samples="/samples/current"' in index.html
 
 var app = express();
 
-app.use(express.logger());
-app.use(express.compress());
+app.use(express.logger())
+app.use(express.compress({filter: compressionFilter}));
 
 //app.get("/about/stations", function(request, response) {
 //    var result = {};
@@ -167,9 +170,16 @@ function handleUnexpected(res, error) {
 }
 
 /**
+ * Returns true if the response should be compressed.
+ */
+function compressionFilter(req, res) {
+    return /json|text|javascript|font/.test(res.getHeader('Content-Type'));
+}
+
+/**
  * Returns i as an integer if it matches the regex and lies in the range [from, to], otherwise NaN.
  */
-function validate(i, regex, from, to) {
+function parseInt(i, regex, from, to) {
     if (!regex.test(i)) {
         return NaN;
     }
@@ -178,6 +188,20 @@ function validate(i, regex, from, to) {
         return NaN;
     }
     return result;
+}
+
+/**
+ * Returns the specified date parts as an array. Any value that is not valid for the date part it represents is
+ * parsed as NaN. For example: "2013", "09", "17", "23" yields [2013, 9, 17, 23] whereas "2013", "9.1", "-17", "42"
+ * yields [2013, NaN, NaN, NaN].
+ */
+function parseDateParts(year, month, day, hour) {
+    return [
+        parseInt(year, /^\d{4}$/, 2000, 2100),
+        parseInt(month, /^\d{1,2}$/, 1, 12),
+        parseInt(day, /^\d{1,2}$/, 1, 31),
+        parseInt(hour, /^\d{1,2}$/, 0, 24)
+    ];
 }
 
 /**
@@ -257,16 +281,33 @@ app.get("/samples/current", function(req, res) {
 
 app.get("/samples/:year/:month/:day/:hour", function(req, res) {
     try {
-        var year = validate(req.params.year, /^\d{4}$/, 2000, 2100);
-        var month = validate(req.params.month, /^\d{1,2}$/, 1, 12);
-        var day = validate(req.params.day, /^\d{1,2}$/, 1, 31);
-        var hour = validate(req.params.hour, /^\d{1,2}$/, 0, 24);
-
-        if (isNaN(year) || isNaN(month) || isNaN(day) || isNaN(hour)) {
+        var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
+        if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
+        process(res, {date: {current: false, parts: parts, zone: "+09:00"}});
+    }
+    catch (error) {
+        handleUnexpected(res, error);
+    }
+});
 
-        process(res, {date: {current: false, parts: [year, month, day, hour], zone: "+09:00"}});
+app.get("/map/current", function(req, res) {
+    try {
+        res.send(indexHTML);
+    }
+    catch (error) {
+        handleUnexpected(res, error);
+    }
+});
+
+app.get("/map/:year/:month/:day/:hour", function(req, res) {
+    try {
+        var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
+        if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
+            return res.send(400);
+        }
+        res.send(indexHTML.replace(samplesRegex, "/samples/" + parts.join("/")));
     }
     catch (error) {
         handleUnexpected(res, error);
