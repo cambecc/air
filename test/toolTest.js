@@ -27,6 +27,9 @@ exports.testPad = function(test) {
     test.equal(tool.pad("xy", 3, {char: " "}), " xy");
     test.equal(tool.pad("xy", 3, {char: " ", radix: 16}), " xy");
 
+    test.equal(tool.pad(-1, 2), "-1");
+    test.equal(tool.pad(-1, 3), "0-1");
+
     test.done();
 }
 
@@ -65,21 +68,34 @@ exports.testFormat = function(test) {
 exports.testToISOString = function(test) {
     test.equal(
         tool.toISOString({year:2013, month:1, day:1, hour:3, minute:30, second:15, zone:"+09:00"}),
-        "2013-01-01T03:30:15+09:00");
+        "2013-01-01 03:30:15+09:00");
 
-    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3, minute:30, second:15}), "2013-02-02T03:30:15Z");
-    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3, minute:30}), "2013-02-02T03:30:00Z");
-    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3}), "2013-02-02T03:00:00Z");
-    test.equal(tool.toISOString({year:2013, month:2, day:2}), "2013-02-02T00:00:00Z");
-    test.equal(tool.toISOString({year:2013, month:2}), "2013-02-01T00:00:00Z");
-    test.equal(tool.toISOString({year:2013}), "2013-01-01T00:00:00Z");
-    test.equal(tool.toISOString({}), "1901-01-01T00:00:00Z");
+    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3, minute:30, second:15}), "2013-02-02 03:30:15Z");
+    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3, minute:30}), "2013-02-02 03:30:00Z");
+    test.equal(tool.toISOString({year:2013, month:2, day:2, hour:3}), "2013-02-02 03:00:00Z");
+    test.equal(tool.toISOString({year:2013, month:2, day:2}), "2013-02-02 00:00:00Z");
+    test.equal(tool.toISOString({year:2013, month:2}), "2013-02-01 00:00:00Z");
+    test.equal(tool.toISOString({year:2013}), "2013-01-01 00:00:00Z");
+    test.equal(tool.toISOString({}), "1901-01-01 00:00:00Z");
 
-    test.equal(tool.toISOString({year:2013, month:1, day:31, hour:24}), "2013-02-01T00:00:00Z");
-    test.equal(tool.toISOString({year:2013, month:1, day:32}), "2013-02-01T00:00:00Z");
-    test.equal(tool.toISOString({year:2013, month:0, day:32}), "2013-01-01T00:00:00Z");  // kinda weird, but consistent
+    test.equal(tool.toISOString({year:2013, month:1, day:31, hour:24}), "2013-02-01 00:00:00Z");
+    test.equal(tool.toISOString({year:2013, month:1, day:32}), "2013-02-01 00:00:00Z");
+    test.equal(tool.toISOString({year:2013, month:0, day:32}), "2013-01-01 00:00:00Z");  // kinda weird, but consistent
 
     test.equal(tool.toISOString({year: "sf", month: "sfd"}), null);
+
+    test.done();
+}
+
+exports.testWithZone = function(test) {
+
+    test.equal(tool.withZone("2013-02-01 00:00:00Z", "Z"), "2013-02-01 00:00:00Z");
+    test.equal(tool.withZone("2013-02-01 00:00:00Z", "+01:00"), "2013-02-01 01:00:00+01:00");
+    test.equal(tool.withZone("2013-02-01 00:00:00Z", "-01:00"), "2013-01-31 23:00:00-01:00");
+
+    test.equal(tool.withZone("2013-02-01 00:00:00+09:00", "+10:00"), "2013-02-01 01:00:00+10:00");
+    test.equal(tool.withZone("2013-02-01 00:00:00+09:00", "+08:00"), "2013-01-31 23:00:00+08:00");
+    test.equal(tool.withZone("2013-02-01 00:00:00+09:00", "Z"), "2013-01-31 15:00:00Z");
 
     test.done();
 }

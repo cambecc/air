@@ -241,7 +241,7 @@ function buildResponse(rows) {
 
     var result = [];
     Object.keys(buckets).forEach(function(date) {
-        result.push({date: date, samples: buckets[date]});
+        result.push({date: tool.withZone(date, "+09:00"), samples: buckets[date]});
     });
     return JSON.stringify(result);
 }

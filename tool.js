@@ -49,11 +49,27 @@ exports.format = function(pattern) {
 }; var format = exports.format;
 
 /**
+ * Returns the date as an ISO string having the specified zone:  "yyyy-MM-dd hh:mm:ss±xx:yy"
+ */
+function dateToISO(date, zone) {
+    return _.isFinite(date.getFullYear()) ?
+        format("{0}-{1}-{2} {3}:{4}:{5}{6}",
+            date.getFullYear(),
+            pad(date.getMonth() + 1, 2),
+            pad(date.getDate(), 2),
+            pad(date.getHours(), 2),
+            pad(date.getMinutes(), 2),
+            pad(date.getSeconds(), 2),
+            zone) :
+        null;
+}
+
+/**
  * Converts the specified object containing date fields to an ISO 8601 formatted string. This function first
  * constructs a Date object by providing the specified fields to the date constructor, then produces a string from
  * the resulting date. As a consequence of constructing a Date object, date fields in excess of the normal ranges
  * will cause the date to overflow to the next valid date. For example, toISOString({year:2013, month:1, day:31,
- * hour:24}) will produce the string "2013-02-01T00:00:00Z".
+ * hour:24}) will produce the string "2013-02-01 00:00:00Z".
  *
  * @param {object} dateFields an object with keys:
  *                     [year:] the four digit year, default is 1901;
@@ -63,7 +79,7 @@ exports.format = function(pattern) {
  *                     [minute:] minutes, default is 0;
  *                     [second:] seconds, default is 0;
  *                     [zone:] a valid ISO timezone offset string, such as "+09:00", default is "Z"
- * @returns {string} the specified parts in ISO 8601 format: yyyy-MM-ddThh:mm:ss±xx:yy, or null if the parts do not
+ * @returns {string} the specified parts in ISO 8601 format: yyyy-MM-dd hh:mm:ss±xx:yy, or null if the parts do not
  *                   represent a valid date.
  */
 exports.toISOString = function(dateFields) {
@@ -75,14 +91,22 @@ exports.toISOString = function(dateFields) {
         coalesce(dateFields.minute, 0),
         coalesce(dateFields.second, 0));
 
-    return _.isFinite(date.getFullYear()) ?
-        format("{0}-{1}-{2}T{3}:{4}:{5}{6}",
-            date.getFullYear(),
-            pad(date.getMonth() + 1, 2),
-            pad(date.getDate(), 2),
-            pad(date.getHours(), 2),
-            pad(date.getMinutes(), 2),
-            pad(date.getSeconds(), 2),
-            coalesce(dateFields.zone, "Z")) :
-        null;
+    return dateToISO(date, coalesce(dateFields.zone, "Z"));
+}
+
+/**
+ * Converts the date represented by the specified ISO string to a different time zone.
+ *
+ * @param isoString a date in ISO 8601 format: yyyy-MM-dd hh:mm:ss±xx:yy.
+ * @param zone a valid ISO timezone offset string, such as "+09:00", representing the zone to convert to.
+ * @returns {string} the date adjusted to the specified time zone as an ISO 8601 string.
+ */
+exports.withZone = function(isoString, zone) {
+    zone = coalesce(zone, "Z");
+    var adjust = zone === "Z" ? 0 : +(zone.split(":")[0]) * 60;
+
+    var date = new Date(isoString);
+    date.setMinutes(date.getMinutes() + adjust + date.getTimezoneOffset());
+
+    return dateToISO(date, zone);
 }
