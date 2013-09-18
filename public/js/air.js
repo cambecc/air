@@ -7,6 +7,7 @@ var frameRate = 40; // one frame per this many milliseconds
 var done = false;
 var pixelsPerUnitVelocity = 1.00;
 var fadeFillStyle = "rgba(0, 0, 0, 0.97)";
+var isFF = /firefox/i.test(navigator.userAgent);
 
 var noVector = [0, 0, -1];
 var projection;
@@ -238,8 +239,8 @@ function doProcess(topo) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", 50) // UNDONE: FF does NOT like a large number here--even canvg is slow
-                .attr("stroke", "#fff")   // Also, the stroke-width should scale with canvas size
+                .attr("stroke-width", isFF ? 2 : 50)  // Wide strokes on FF are very slow.
+                .attr("stroke", "#fff")               // UNDONE: scale stroke-width with canvas size
                 .attr("d", path);
         }));
 
