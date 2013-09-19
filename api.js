@@ -288,6 +288,7 @@ function query(res, constraints) {
 
     function sendResponse(data) {
         res.set("Content-Type", "application/json");
+        res.set("Cache-Control", "public, max-age=0");
         res.send(data);
     }
 
@@ -331,6 +332,7 @@ app.get("/map/:year/:month/:day/:hour", function(req, res) {
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
+//        res.set("Cache-Control", "public, max-age=0");
         res.send(indexHTML.replace(samplesRegex, "/samples/" + parts.join("/")));
     }
     catch (error) {

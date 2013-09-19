@@ -1,5 +1,8 @@
 "use strict";
 
+console.log("============================================================");
+console.log("Starting " + new Date() + "...");
+
 var util = require("util");
 var _ = require("underscore");
 var when = require("when");
