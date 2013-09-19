@@ -9,7 +9,12 @@ var db = require("./db");
 var tool = require("./tool");
 
 var port = process.argv[2];
-var indexHTML = fs.readFileSync("./public/index.html", {encoding: "utf-8"});
+
+// Cache index.html to serve it out. Changes require a restart to pick them up. Need to find a better way to do this.
+var indexHTML = "./public/index.html";
+var indexHTMLText = fs.readFileSync(indexHTML, {encoding: "utf-8"});
+var indexHTMLDate = fs.statSync(indexHTML).mtime;
+
 var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-samples="/samples/current"' in index.html
 
 var app = express();
@@ -214,10 +219,25 @@ function parseDateParts(year, month, day, hour) {
 }
 
 /**
+ * Adds headers to a response to enable caching and specify the last modified date.
+ */
+function prepareCacheHeaders(res, lastModified) {
+    res.set("Cache-Control", "public, max-age=0");
+    res.set("Last-Modified", lastModified.toUTCString());
+}
+
+/**
  * Casts v to a Number if it is truthy, otherwise null.
  */
 function asNullOrNumber(v) {
     return v ? +v : null;
+}
+
+/**
+ * Returns the greater of two dates.
+ */
+function dateMax(a, b) {
+    return a < b ? b : a;  // Wish I could use Math.max here...
 }
 
 function buildResponse(rows) {
@@ -248,10 +268,12 @@ function buildResponse(rows) {
     });
 
     var result = [];
+    var mostRecent = new Date("1901-01-01 00:00:00Z");
     Object.keys(buckets).forEach(function(date) {
         result.push({date: tool.withZone(date, "+09:00"), samples: buckets[date]});
+        mostRecent = dateMax(mostRecent, new Date(date));
     });
-    return JSON.stringify(result);
+    return {lastModified: mostRecent, jsonPayload: JSON.stringify(result)};
 }
 
 function doQuery(constraints) {
@@ -287,15 +309,15 @@ function query(res, constraints) {
     var queryTask = memoizedQuery(constraints);
 
     function sendResponse(data) {
+        prepareCacheHeaders(res, data.lastModified);
         res.set("Content-Type", "application/json");
-        res.set("Cache-Control", "public, max-age=0");
-        res.send(data);
+        res.send(data.jsonPayload);
     }
 
     return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
 }
 
-app.get("/samples/current/data.json", function(req, res) {
+app.get("/samples/current", function(req, res) {
     try {
         query(res, {date: {current: true, parts: [], zone: "+09:00"}});
     }
@@ -304,7 +326,7 @@ app.get("/samples/current/data.json", function(req, res) {
     }
 });
 
-app.get("/samples/:year/:month/:day/:hour/data.json", function(req, res) {
+app.get("/samples/:year/:month/:day/:hour", function(req, res) {
     try {
         var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
@@ -319,7 +341,8 @@ app.get("/samples/:year/:month/:day/:hour/data.json", function(req, res) {
 
 app.get("/map/current", function(req, res) {
     try {
-        res.send(indexHTML);
+        prepareCacheHeaders(res, indexHTMLDate);
+        res.send(indexHTMLText);
     }
     catch (error) {
         handleUnexpected(res, error);
@@ -332,8 +355,8 @@ app.get("/map/:year/:month/:day/:hour", function(req, res) {
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
-//        res.set("Cache-Control", "public, max-age=0");
-        res.send(indexHTML.replace(samplesRegex, "/samples/" + parts.join("/")));
+        prepareCacheHeaders(res, indexHTMLDate);
+        res.send(indexHTMLText.replace(samplesRegex, "/samples/" + parts.join("/")));
     }
     catch (error) {
         handleUnexpected(res, error);
