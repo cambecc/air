@@ -13,9 +13,17 @@ var indexHTML = fs.readFileSync("./public/index.html", {encoding: "utf-8"});
 var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-samples="/samples/current"' in index.html
 
 var app = express();
-
-app.use(express.logger())
 app.use(express.compress({filter: compressionFilter}));
+
+var logger = express.logger;
+logger.token("headers", function(req, res) {
+    var result = "";
+    Object.keys(req.headers).forEach(function(header) {
+        result += tool.format("\n{0}: {1}", header, req.headers[header]);
+    });
+    return result + "\n----------\n" + tool.coalesce(res._header, "").trim() + "\n";
+});
+app.use(logger("[:date] :remote-addr :method :url HTTP/:http-version:headers"));
 
 //app.get("/about/stations", function(request, response) {
 //    var result = {};
