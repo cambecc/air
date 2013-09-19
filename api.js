@@ -294,7 +294,7 @@ function query(res, constraints) {
     return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
 }
 
-app.get("/samples/current", function(req, res) {
+app.get("/samples/current/data.json", function(req, res) {
     try {
         query(res, {date: {current: true, parts: [], zone: "+09:00"}});
     }
@@ -303,7 +303,7 @@ app.get("/samples/current", function(req, res) {
     }
 });
 
-app.get("/samples/:year/:month/:day/:hour", function(req, res) {
+app.get("/samples/:year/:month/:day/:hour/data.json", function(req, res) {
     try {
         var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
