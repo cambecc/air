@@ -218,5 +218,5 @@ start()
     .then(null, console.error);
 
 setInterval(function update() {
-    doP160().then(api.reset).then(null, console.error);
+    doP160().then(api.resetQueryMemos).then(null, console.error);
 }, 10 * 60 * 1000);  // update every ten minutes

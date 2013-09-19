@@ -259,13 +259,32 @@ function doQuery(constraints) {
     return db.execute(stmt).then(buildResponse);
 }
 
-var memos = {};
+function memoize(f, maxEntries) {
+    var memos = {};
+
+    function invoke(x) {
+        var key = JSON.stringify(arguments);
+        if (_.has(memos, key)) {
+            return memos[key];
+        }
+
+        var keys = Object.keys(memos);
+        if (keys.length >= maxEntries) {  // If too many memos, just remove a random one--it's easy.
+             delete memos[keys[_.random(0, keys.length - 1)]];
+        }
+
+        return memos[key] = f.apply(this, arguments);
+    }
+
+    invoke.resetMemos = function() { memos = {}; };
+    return invoke;
+}
+
+var memoizedQuery = memoize(doQuery, 100);  // Allow many memos, but don't grow indefinitely.
+exports.resetQueryMemos = memoizedQuery.resetMemos;
 
 function query(res, constraints) {
-    var key = JSON.stringify(constraints);
-    var queryTask = _.has(memos, key) ?
-        memos[key] :
-        (memos[key] = doQuery(constraints));
+    var queryTask = memoizedQuery(constraints);
 
     function sendResponse(data) {
         res.set("Content-Type", "application/json");
@@ -273,10 +292,6 @@ function query(res, constraints) {
     }
 
     return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
-}
-
-exports.reset = function() {
-    memos = {};
 }
 
 app.get("/samples/current", function(req, res) {
