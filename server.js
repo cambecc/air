@@ -162,6 +162,7 @@ function doP160Page(page, date) {
 function doP160(date) {
     // return a promise for a boolean which is false if data was processed, and true if data was not available
     // i.e., true == we are done.
+    // CONSIDER: This function's behavior is subtle and confusing. Improve.
     var promises = [doP160Page(1, date), doP160Page(2, date)];
     return when.reduce(
         promises,
@@ -174,22 +175,23 @@ function doP160(date) {
 function pollP160ForUpdates() {
     // Return a promise for a boolean which is true if new data was found. New data is found if the database
     // reports that rows have been inserted or updated after scraping both pages.
+    // CONSIDER: This function's behavior is subtle and confusing. Improve.
     var promises = [doP160Page(1), doP160Page(2)];
-    return when.reduce(
-        promises,
-        function(current, value) {
-            var result = value && value[0] || {};
-            return current + result.rowCount;
-        },
-        0)
-        .then(function(rowCount) {
-            log.info("results of poll: rowCount = " + rowCount);
-            var success = rowCount >= 2;  // ugh.
-            if (success) {
+
+    function sumRowCounts(current, value) {
+        var result = value && value[0] || {};
+        return current + result.rowCount;  // abstraction leakage -- relying on rowCount to exist
+    }
+
+    return when.reduce(promises, sumRowCounts, 0).then(
+        function(rowsInsertedOrUpdated) {
+            log.info("results of poll: rowsInsertedOrUpdated = " + rowsInsertedOrUpdated);
+            var foundNewData = rowsInsertedOrUpdated >= 2;  // ugh.
+            if (foundNewData) {
                 log.info("resetting query memos");
                 api.resetQueryMemos();
             }
-            return success;
+            return foundNewData;
         });
 }
 
@@ -238,6 +240,9 @@ function doP160Historical(hours) {
     }(false);
 }
 
+/**
+ * Look for new air data every hour.
+ */
 function pollForUpdates() {
     var ONE_MINUTE = 60 * 1000;
     var ONE_HOUR = 60 * ONE_MINUTE;
@@ -257,5 +262,5 @@ start()
     .then(doP160.bind(undefined, null))
     .then(doStationDetails)
     .then(pollForUpdates)
-    .then(doP160Historical.bind(undefined, 0/*9 * 24*/)) // up to nine days of historical data available
+    .then(doP160Historical.bind(undefined, 9 * 24)) // up to nine days of historical data available
     .then(null, function(e) { log.error(e.stack); });
