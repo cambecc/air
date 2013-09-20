@@ -7,3 +7,5 @@
 *.o     binary
 *.so    binary
 *.ttf   binary
+*.ico   binary
+*.png   binary

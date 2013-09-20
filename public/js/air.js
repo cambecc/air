@@ -39,8 +39,8 @@ var view = function() {
 var displayDiv = document.getElementById("display");
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-var topoTask = loadJson(displayDiv.dataset.topography);
-var dataTask = loadJson(displayDiv.dataset.samples);
+var topoTask = loadJson(displayDiv.getAttribute("data-topography"));
+var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
 
 topoTask.then(doProcess).then(null, log.error);
 
