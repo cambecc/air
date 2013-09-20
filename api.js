@@ -7,6 +7,7 @@ var express = require("express");
 var when = require("when");
 var db = require("./db");
 var tool = require("./tool");
+var log = tool.log();
 
 var port = process.argv[2];
 
@@ -178,8 +179,7 @@ app.use(logger("[:date] :remote-addr :method :url HTTP/:http-version:headers"));
 //});
 
 function handleUnexpected(res, error) {
-    console.error(error);
-    console.error(error.stack);
+    log.error(error.stack);
     res.send(500);
 }
 
@@ -366,4 +366,4 @@ app.get("/map/:year/:month/:day/:hour", function(req, res) {
 app.use(express.static(__dirname + "/public"));
 
 app.listen(port);
-console.log(tool.format("Listening on port {0}...", port));
+log.info(tool.format("Listening on port {0}...", port));

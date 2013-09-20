@@ -1,6 +1,21 @@
 "use strict";
 
 var _ = require("underscore");
+var when = require("when");
+var winston = require("winston");
+
+/**
+ * Returns a new, nicely configured winston logger.
+ *
+ * @returns {winston.Logger}
+ */
+exports.log = function() {
+    return new (winston.Logger)({
+        transports: [
+            new (winston.transports.Console)({level: 'debug', timestamp: true, colorize: false})
+        ]
+    });
+}; var log = exports.log();
 
 /**
  * Returns the string representation of a number padded with leading characters to make
@@ -109,4 +124,60 @@ exports.withZone = function(isoString, zone) {
     date.setMinutes(date.getMinutes() + adjust + date.getTimezoneOffset());
 
     return dateToISO(date, zone);
+}
+
+/**
+ * Repeatedly calls a function with the specified period, waiting 'initialDelay' milliseconds before the first
+ * invocation. If the function returns true, then the invocation for the next period is scheduled. If the function
+ * returns false, then function invocation is retried on a schedule determined by the backoff function.
+ *
+ * The backoff function is a function(i) that is invoked when the ith retry has failed, and returns the number
+ * of milliseconds to wait before attempting the next retry. For example, given a time t that corresponds to a
+ * period Px in which to invoke the function, i is initially 0. If the invocation at t fails, invocation is
+ * scheduled for backoff(0) milliseconds later, and i is incremented. If that invocation yet again fails, the next
+ * invocation is scheduled for backoff(1) milliseconds later, and i again increments. This continues until the
+ * function succeeds. Upon success, i becomes 0, and the next invocation is scheduled for the period Px+1.
+ *
+ * It is sometimes useful to initialize i to a negative value for each period Px. This has the effect of "retrying"
+ * the function _before_ the desired time, allowing the schedule to adapt to noisy environments where the period of
+ * some recurring event exhibits variation. For example, given an estimated time t when function invocation is
+ * expected to be successful, initializing i to -1 means function invocation first occurs at t - backoff(-1).
+ * Assuming this fails, the next attempt occurs at t (backoff(-1) milliseconds later), then again backoff(0) ms
+ * later, and so on as discussed earlier.
+ *
+ * This function returns a function that, when invoked, cancels all future invocations.
+ *
+ * @param funcToCall the function to invoke repeatedly.
+ * @param initialDelay the milliseconds to wait before the first invocation.
+ * @param period the desired milliseconds between subsequent invocations.
+ * @param backoff a function(i) that returns the number of milliseconds to wait after the ith retry fails.
+ * @param [initialRetry] the initial ith retry value for each period; defaults to 0.
+ * @returns {Function} when the returned function is invoked, all future invocations are canceled.
+ */
+exports.setFlexInterval = function(funcToCall, initialDelay, period, backoff, initialRetry) {
+    var done = false;
+    initialRetry = initialRetry || 0;
+    var i = initialRetry;
+    var start = 0;
+    for (var t = initialRetry; t < 0; t++) {
+        start += backoff(t);
+    }
+
+    function schedule(success) {
+        if (success) {
+            i = initialRetry;
+        }
+        var next = Math.max(0, success ? period - start : backoff(i++));
+        log.info("scheduling for: " + next);
+        setTimeout(invoke, next);
+    }
+
+    function invoke() {
+        if (!done) {
+            when(funcToCall()).then(schedule, function(e) { log.error(e.stack); });
+        }
+    }
+
+    setTimeout(invoke, initialDelay);
+    return function() { done = true; };
 }

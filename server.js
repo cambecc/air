@@ -1,7 +1,7 @@
 "use strict";
 
 console.log("============================================================");
-console.log("Starting " + new Date() + "...");
+console.log(new Date().toISOString() + " - Starting");
 
 var util = require("util");
 var _ = require("underscore");
@@ -13,6 +13,7 @@ var schema = require("./schema");
 var api = require("./api");
 var stationsData = require("./station-data");
 
+var log = tool.log();
 var iconvShiftJIStoUTF8 = new (require("iconv")).Iconv("SHIFT_JIS", "UTF-8//TRANSLIT//IGNORE");
 var shiftJIStoUTF8 = iconvShiftJIStoUTF8.convert.bind(iconvShiftJIStoUTF8);
 
@@ -117,11 +118,11 @@ function processP160Row(row, date) {
 }
 
 function processP160(dom) {
-    console.log("Processing P160...");
+    log.info("Processing P160...");
 
     var tables = scraper.tablesOf(dom);
     if (tables.length < 4) {
-        console.log("no data found");
+        log.error("no data found");
         return null;
     }
 
@@ -134,7 +135,7 @@ function processP160(dom) {
 }
 
 function start() {
-    console.log("Preparing tables...");
+    log.info("Preparing tables...");
     return persist([db.createTable(schema.stations), db.createTable(schema.samples)]);
 }
 
@@ -148,7 +149,7 @@ function persist(statements) {
     if (!statements) {
         return when.resolve(null);
     }
-    console.log("Persisting...");
+    log.info("Persisting...");
     return db.executeAll(statements);
 }
 
@@ -161,16 +162,39 @@ function doP160Page(page, date) {
 function doP160(date) {
     // return a promise for a boolean which is false if data was processed, and true if data was not available
     // i.e., true == we are done.
+    var promises = [doP160Page(1, date), doP160Page(2, date)];
     return when.reduce(
-        [doP160Page(1, date), doP160Page(2, date)],
+        promises,
         function(current, value) {
             return current && !value;
         },
         true);
 }
 
+function pollP160ForUpdates() {
+    // Return a promise for a boolean which is true if new data was found. New data is found if the database
+    // reports that rows have been inserted or updated after scraping both pages.
+    var promises = [doP160Page(1), doP160Page(2)];
+    return when.reduce(
+        promises,
+        function(current, value) {
+            var result = value && value[0] || {};
+            return current + result.rowCount;
+        },
+        0)
+        .then(function(rowCount) {
+            log.info("results of poll: rowCount = " + rowCount);
+            var success = rowCount >= 2;  // ugh.
+            if (success) {
+                log.info("resetting query memos");
+                api.resetQueryMemos();
+            }
+            return success;
+        });
+}
+
 function doStationDetails() {
-    console.log("Preparing station details...");
+    log.info("Preparing station details...");
     var statements = [];
     _.keys(stationNames).forEach(function(name) {
         statements.push(db.upsert(schema.stations, {id: stationNames[name], name: name}));
@@ -189,7 +213,7 @@ function doStationDetails() {
 }
 
 function doP160Historical(hours) {
-    console.log("Starting P160 Historical...");
+    log.info("Starting P160 Historical...");
     var now = new Date().getTime();
     var dates = [];
     for (var i = 1; i <= hours; i++) {
@@ -205,21 +229,33 @@ function doP160Historical(hours) {
     return function doAnotherDate(done) {
         if (dates.length > 0 && !done) {
             var date = dates.shift();
-            console.log(tool.format("Processing {0}... (remaining: {1})", date, dates.length));
+            log.info(tool.format("Processing {0}... (remaining: {1})", date, dates.length));
             return doP160(date).then(wait).then(doAnotherDate);
         }
         else {
-            console.log("Finished P160 Historical");
+            log.info("Finished P160 Historical");
         }
     }(false);
+}
+
+function pollForUpdates() {
+    var ONE_MINUTE = 60 * 1000;
+    var ONE_HOUR = 60 * ONE_MINUTE;
+
+    // Wait an exponentially longer amount of time after each retry, up to 15 min.
+    function exponentialBackoff(t) {
+        return Math.min(Math.pow(2, t < 0 ? -(t + 1) : t), 15) * ONE_MINUTE;
+    }
+
+    // The air data is updated every hour, but we don't know exactly when. By specifying initialRetry = -2,
+    // the pages get scraped a little earlier than the estimated time. Eventually, the algorithm will center
+    // itself on the actual time, even if it varies a bit.
+    tool.setFlexInterval(pollP160ForUpdates, ONE_MINUTE, ONE_HOUR, exponentialBackoff, -2);
 }
 
 start()
     .then(doP160.bind(undefined, null))
     .then(doStationDetails)
+    .then(pollForUpdates)
     .then(doP160Historical.bind(undefined, 0/*9 * 24*/)) // up to nine days of historical data available
-    .then(null, console.error);
-
-setInterval(function update() {
-    doP160().then(api.resetQueryMemos).then(null, console.error);
-}, 10 * 60 * 1000);  // update every ten minutes
+    .then(null, function(e) { log.error(e.stack); });

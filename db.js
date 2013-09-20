@@ -6,6 +6,7 @@ var tool = require("./tool");
 var when = require("when");
 var pg = require("pg");
 var schema = require("./schema");
+var log = tool.log();
 
 var connectionString = process.argv[3];  // for example: "postgres://postgres:12345@localhost:5432/air"
 var labels = ["year", "month", "day", "hour", "minute", "second"];
@@ -194,7 +195,7 @@ function sampleTypeConstraint(constraints) {
  * @returns {{sql: string, args: Array}} an object {sql: x, args: y} representing a sample select statement.
  */
 exports.selectSamples = function(tableSpec, stationTableSpec, constraints) {
-    console.log(constraints);
+    log.info(constraints);
     var dateColumn = quoteName("date");
     var idColumn = quoteName("id");
     var stationIdColumn = quoteName("stationId");
@@ -285,7 +286,7 @@ exports.execute = function(statement) {
         var sql = typeof statement === "string" ? statement : statement.sql;
         var args = typeof statement === "string" ? [] : (statement.args || []);
 
-        console.log(sql + (args.length > 0 ? "; " + args : ""));
+        log.info(sql + (args.length > 0 ? "; " + args : ""));
 
         client.query(sql, args, function(error, result) {
             done();
@@ -319,12 +320,12 @@ exports.executeAll = function(statements) {
             return d.reject(error);
         }
 
-        d.resolve(statements.map(function(statement, index) {
+        var statementPromises = statements.map(function(statement, index) {
             var sd = when.defer();
             var sql = typeof statement === "string" ? statement : statement.sql;
             var args = typeof statement === "string" ? [] : (statement.args || []);
 
-//            console.log(/*sql + */(args.length > 0 ? "; " + args : ""));
+//            log.info(/*sql + */(args.length > 0 ? "; " + args : ""));
 
             client.query(sql, args, function(error, result) {
                 if (index == last || error) {
@@ -339,7 +340,11 @@ exports.executeAll = function(statements) {
             });
 
             return sd.promise;
-        }));
+        });
+
+        when.all(statementPromises).then(function(a) {
+            d.resolve(a);
+        });
     });
     return d.promise;
 }

@@ -3,6 +3,8 @@
 var when = require("when");
 var http = require("http");
 var htmlparser = require("htmlparser");
+var tool = require("./tool");
+var log = tool.log();
 
 /**
  * Converts the provided HTML text into a dom.
@@ -88,17 +90,17 @@ exports.matchText = function(regex, dom) {
 exports.fetch = function(options, converter) {
     converter = converter || function nop(buffer) { return buffer; };
     var d = when.defer();
-    console.log("get: " + options);
+    log.info("get: " + options);
     http.get(options, function(response) {
         var chunks = [];
         response.on("data", function(chunk) {
             chunks.push(chunk);
         });
         response.on("end", function() {
-            console.log("got: " + options);
+            log.info("got: " + options);
             var converted = converter(Buffer.concat(chunks));
             var parsed = parseHTML(converted);
-            console.log("done: " + options);
+            log.info("done: " + options);
             d.resolve(parsed);
         });
     }).on("error", function(error) {
