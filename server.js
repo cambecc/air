@@ -262,5 +262,5 @@ start()
     .then(doP160.bind(undefined, null))
     .then(doStationDetails)
     .then(pollForUpdates)
-    .then(doP160Historical.bind(undefined, 9 * 24)) // up to nine days of historical data available
+    .then(doP160Historical.bind(undefined, 0/*9 * 24*/)) // up to nine days of historical data available
     .then(null, function(e) { log.error(e.stack); });
