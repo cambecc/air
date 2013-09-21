@@ -1,16 +1,10 @@
 "use strict";
 
 var π = Math.PI;
-var particleCount = 5000;
-var particleMaxAge = 40;
-var frameRate = 40; // one frame per this many milliseconds
-var pixelsPerUnitVelocity = 1.00;
-var fadeFillStyle = "rgba(0, 0, 0, 0.97)";
-var isFF = /firefox/i.test(navigator.userAgent);
-
 var noVector = [0, 0, -1];
 var projection;
 var bbox;
+var engineParameters;
 
 // Tweak document to distinguish CSS styling between touch and non-touch environments.
 if ("ontouchstart" in document.documentElement) {
@@ -119,14 +113,10 @@ function polarToRectangular(v) {
 
 /**
  * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
- * onto the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
+ * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
+ * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
  */
-function createProjection(boundingBox, width, height) {
-    var lng0 = boundingBox[0];  // lower left longitude
-    var lat0 = boundingBox[1];  // lower left latitude
-    var lng1 = boundingBox[2];  // upper right longitude
-    var lat1 = boundingBox[3];  // upper right latitude
-
+function createProjection(lng0, lat0, lng1, lat1, width, height) {
     // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
     // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
     var projection = d3.geo.albers()
@@ -145,6 +135,31 @@ function createProjection(boundingBox, width, height) {
     var t = [width / 2, height / 2];
 
     return projection.scale(s).translate(t);
+}
+
+function createBoundingBox(lng0, lat0, lng1, lat1, projection) {
+    var upperLeft = projection([lng0, lat1]).map(Math.floor);
+    var lowerRight = projection([lng1, lat0]).map(Math.ceil);
+    var width = lowerRight[0] - upperLeft[0] + 1;
+    var height = lowerRight[1] - upperLeft[1] + 1;
+    return {
+        x: upperLeft[0],
+        y: upperLeft[1],
+        width: width,
+        height: height,
+        area: width * height
+    }
+}
+
+function calculateEngineParameters(bbox) {
+    return {
+        particleCount: Math.round(bbox.height / 0.14),
+        particleMaxAge: 40,
+        pixelsPerUnitVelocity: bbox.height / 700,
+        fieldMaskWidth: Math.ceil(bbox.height * 0.06),
+        fadeFillStyle: "rgba(0, 0, 0, 0.97)",
+        frameRate: 40
+    };
 }
 
 /**
@@ -188,6 +203,9 @@ function render(width, height, appendTo) {
         canvas.setAttribute("height", height);
         canvg(canvas, div.innerHTML.trim());
 
+//        var f = document.getElementById("field-canvas");
+//        f.parentNode.insertBefore(canvas, f.nextSibling);
+
         log.timeEnd("rendering canvas");
         d.resolve(canvas);
     }, 25);
@@ -215,11 +233,13 @@ function plotCurrentPosition(svg, projection) {
 function doProcess(topo) {
     log.time("building meshes");
 
-    projection = createProjection(topo.bbox, view.width, view.height);
+    projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view.width, view.height);
+    bbox = createBoundingBox(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
+    engineParameters = calculateEngineParameters(bbox);
 
-    var ur = projection([topo.bbox[0], topo.bbox[3]]);
-    var ll = projection([topo.bbox[2], topo.bbox[1]]);
-    bbox = [ur.map(Math.floor), ll.map(Math.ceil)];
+    log.debug(JSON.stringify(view));
+    log.debug(JSON.stringify(bbox));
+    log.debug(JSON.stringify(engineParameters));
 
     var path = d3.geo.path().projection(projection);
     var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
@@ -243,18 +263,19 @@ function doProcess(topo) {
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", "2")
+                .attr("stroke-width", 2)
                 .attr("stroke", "#000")
                 .attr("d", path);
         }));
 
     var fieldMaskTask = masker(
         render(view.width, view.height, function(svg) {
+            var isFF = /firefox/i.test(navigator.userAgent);
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", isFF ? 2 : 50)  // Wide strokes on FF are very slow.
-                .attr("stroke", "#fff")               // UNDONE: scale stroke-width with canvas size
+                .attr("stroke-width", isFF ? 2 : engineParameters.fieldMaskWidth)  // Wide strokes on FF are very slow.
+                .attr("stroke", "#fff")
                 .attr("d", path);
         }));
 
@@ -503,7 +524,6 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
                     if (fieldMask(x, y)) {
                         v = [0, 0, 0];
                         v = interpolate(x, y, v);
-                        v = scaleVector(v, pixelsPerUnitVelocity)
                         v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
                     }
                     column[y] = v;
@@ -526,8 +546,6 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
 
 function processVectorField(field) {
     var particles = [];
-    var width = bbox[1][0] - bbox[0][0] + 1;
-    var height = bbox[1][1] - bbox[0][1] + 1;
 
     d3.select("#field-canvas").on("click", mouseClick);
 
@@ -557,11 +575,11 @@ function processVectorField(field) {
         var y;
         var i = 30;
         do {
-            x = Math.random() * width + bbox[0][0];
-            y = Math.random() * height + bbox[0][1];
+            x = bbox.x + Math.random() * bbox.width;
+            y = bbox.y + Math.random() * bbox.height;
             if (--i == 0) {  // UNDONE: ugh. remove this safety net. make better. somehow.
-                x = width / 2;
-                y = height / 2;
+                x = bbox.width / 2;
+                y = bbox.height / 2;
                 break;
             }
         } while (vectorAt(x, y) === noVector);
@@ -569,8 +587,8 @@ function processVectorField(field) {
         particle.y = y;
     }
 
-    for (var i = 0; i < particleCount; i++) {
-        var particle = {age: Math.floor(Math.random() * particleMaxAge)};
+    for (var i = 0; i < engineParameters.particleCount; i++) {
+        var particle = {age: Math.floor(Math.random() * engineParameters.particleMaxAge)};
         randomize(particle);
         particles.push(particle);
     }
@@ -591,9 +609,9 @@ function processVectorField(field) {
         var start = +new Date;
 
         var prev = g.globalCompositeOperation;
-        g.fillStyle = fadeFillStyle;
+        g.fillStyle = engineParameters.fadeFillStyle;
         g.globalCompositeOperation = "destination-in";
-        g.fillRect(bbox[0][0], bbox[0][1], width, height);
+        g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
         g.globalCompositeOperation = prev;
 
         var buckets = [];
@@ -602,7 +620,7 @@ function processVectorField(field) {
         }
 
         particles.forEach(function(particle) {
-            if (particle.age > particleMaxAge) {
+            if (particle.age > engineParameters.particleMaxAge) {
                 randomize(particle);
                 particle.age = 0;
             }
@@ -613,12 +631,12 @@ function processVectorField(field) {
 
             var v = vectorAt(x, y);
             if (v === noVector) {  // particle has gone off the field, never to return...
-                particle.age = particleMaxAge + 1;
+                particle.age = engineParameters.particleMaxAge + 1;
                 return;
             }
 
-            var xt = x + v[0];
-            var yt = y + v[1];
+            var xt = x + v[0] * engineParameters.pixelsPerUnitVelocity;
+            var yt = y + v[1] * engineParameters.pixelsPerUnitVelocity;
             var m = v[2];
 
             if (m >= 0 && vectorAt(xt, yt)[2] >= 0) {
@@ -650,7 +668,7 @@ function processVectorField(field) {
 
         if (!done) {
             var d = (+new Date - start);
-            var next = Math.max(frameRate, frameRate - d);
+            var next = Math.max(engineParameters.frameRate, engineParameters.frameRate - d);
             setTimeout(draw, next);
         }
     })();
