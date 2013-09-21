@@ -66,15 +66,29 @@ h1, h2 {
     font-size: 2.5em;
 }
 
-p {
+p, span {
     font-size: 1.2em;
 }
 
-a {
+a, .text-button {
     color: #888;
 }
 
-a:hover {
+a:hover, a:focus {
     color: #fff;
     transition: color 125ms ease-in;
+    -webkit-transition: color 125ms ease-in;
+}
+
+.no-touch .text-button:hover, .no-touch .text-button:focus {
+    color: #fff;
+    transition: color 125ms ease-in;
+    -webkit-transition: color 125ms ease-in;
+    cursor: default;
+}
+
+.text-button:active {
+    color: #fff;
+    transition: color 25ms ease-in;
+    -webkit-transition: color 25ms ease-in;
 }

@@ -4,7 +4,6 @@ var π = Math.PI;
 var particleCount = 5000;
 var particleMaxAge = 40;
 var frameRate = 40; // one frame per this many milliseconds
-var done = false;
 var pixelsPerUnitVelocity = 1.00;
 var fadeFillStyle = "rgba(0, 0, 0, 0.97)";
 var isFF = /firefox/i.test(navigator.userAgent);
@@ -12,6 +11,22 @@ var isFF = /firefox/i.test(navigator.userAgent);
 var noVector = [0, 0, -1];
 var projection;
 var bbox;
+
+// Tweak document to distinguish CSS styling between touch and non-touch environments.
+if ("ontouchstart" in document.documentElement) {
+    document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
+}
+else {
+    document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
+}
+
+/**
+ * Returns true if the event is a space or enter key press.
+ */
+function isSpaceOrEnter(event) {
+    var key = event.keyCode || event.charCode;
+    return key == 13 || key == 32;
+}
 
 /**
  * An object to handle logging if browser supports it.
@@ -44,6 +59,11 @@ var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
 
 topoTask.then(doProcess).then(null, log.error);
 
+var done = false;
+function stopAnimation() { done = true; }
+d3.select("#stop-animation").on("click", stopAnimation);
+d3.select("#stop-animation").on("keypress", function() { if (isSpaceOrEnter(d3.event)) stopAnimation(); });
+
 /**
  * Returns a human readable string for the provided coordinates.
  */
@@ -59,7 +79,7 @@ function formatVector(x, y) {
     var d = Math.atan2(-x, y) / π * 180;  // calculate into-the-wind cardinal degrees
     var wd = Math.round((d + 360) % 360 / 5) * 5;  // shift [-180, 180] to [0, 360], and round to nearest 5.
     var m = Math.sqrt(x * x + y * y);
-    return wd.toFixed(0) + " @ " + m.toFixed(1) + " m/s";
+    return wd.toFixed(0) + "º @ " + m.toFixed(1) + " m/s";
 }
 
 /**
@@ -101,7 +121,7 @@ function polarToRectangular(v) {
     var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // convert to standard radians, counter-clockwise
     var wv = v[1];  // wind velocity
     var x = Math.cos(wd_rad) * wv;
-    var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space increases downwards
+    var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space grows downwards
     return [x, y];  // rectangular form wind vector in pixel space
 }
 
@@ -183,9 +203,11 @@ function render(width, height, appendTo) {
 }
 
 function plotCurrentPosition(svg, projection) {
-    if (navigator.geolocation) {
+    if (navigator.geolocation && !document.getElementById("position")) {
+        log.debug("requesting location...");
         navigator.geolocation.getCurrentPosition(
             function(position) {
+                log.debug("position available");
                 var p = projection([position.coords.longitude, position.coords.latitude]);
                 var x = Math.round(p[0]);
                 var y = Math.round(p[1]);
@@ -244,7 +266,12 @@ function doProcess(topo) {
                 .attr("d", path);
         }));
 
-    plotCurrentPosition(mapSvg, projection);
+    function showLocation() {
+        plotCurrentPosition(mapSvg, projection);
+    }
+
+    d3.select("#show-location").on("click", showLocation);
+    d3.select("#show-location").on("keypress", function() { if (isSpaceOrEnter(d3.event)) showLocation(); });
 
     dataTask.then(function(data) {
         var features = data[0].samples.map(function(e) {
@@ -335,7 +362,7 @@ function heapify(a, key) {
 }
 
 /**
- * Finds the neighbors nearest to the specified point, starting the search at the k-d tree provided as node.
+ * Finds the neighbors nearest to the specified point, starting the search at the k-d tree provided as 'node'.
  * The n closest neighbors are placed in the results array (of length n) in no defined order.
  */
 function nearest(point, node, results) {
@@ -366,8 +393,8 @@ function nearest(point, node, results) {
         nearest(point, containingSide, results);
     }
 
-    // Now determine if the current node is a close neighbor. Do the comparison using _squared_ distance so
-    // we don't waste time doing unnecessary Math.sqrt operations.
+    // Now determine if the current node is a close neighbor. Do the comparison using _squared_ distance to
+    // avoid unnecessary Math.sqrt operations.
     var d2 = distance2(point, node.location);
     var n = results[0];
     if (d2 < n.distance2) {
@@ -379,7 +406,7 @@ function nearest(point, node, results) {
 
     if (otherSide) {
         // The other partition *might* have relevant neighbors if the point is closer to the partition plane
-        // than the worst neighbor encountered so far. Descend down the other side if so.
+        // than the worst neighbor encountered so far. If so, descend down the other side.
         if ((planeDistance * planeDistance) < results[0].distance2) {
             nearest(point, otherSide, results);
         }
@@ -391,8 +418,9 @@ function nearest(point, node, results) {
  * interpolation over the specified stations using k closest neighbors. The stations array must be comprised of
  * elements with the structure {point: [x, y], sample: [vx, vy]}, where sample represents a vector in rectangular form.
  *
- * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as result.
- * After invocation, result holds the interpolated vector vxi, vyi in its 0th and 1st elements, respectively.
+ * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as 'result'
+ * to provide the initial value. After invocation, result holds the interpolated vector vxi, vyi in its 0th and 1st
+ * elements, respectively.
  */
 function idw(stations, k) {
 
@@ -493,7 +521,7 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
                 }
                 x++;
 
-                if ((+new Date - start) > 100) {
+                if ((+new Date - start) > 100) {  // UNDONE: magic numbers
                     setTimeout(batchInterpolate, 25);
                     return;
                 }
@@ -518,10 +546,7 @@ function processVectorField(field) {
         var p = d3.mouse(this);
         var c = projection.invert(p);
         var v = vectorAt(p[0], p[1]);
-        if (v[2] === -1) {
-            done = true;
-        }
-        else {
+        if (v[2] !== -1) {
             displayCoordinates(c);
             displayVectorDetails(v);
         }

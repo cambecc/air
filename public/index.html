@@ -4,11 +4,11 @@
     <meta charset="utf-8"/>
     <meta name="author" content="Cameron Beccario"/>
     <meta name="description" content="Tokyo Air"/>
-    <link rel="stylesheet" type="text/css" href="/css/styles.css"/>
+    <title>東京風速</title>
     <link rel="shortcut icon" href="/favicon.ico"/>
     <link rel="apple-touch-icon" sizes="120x120" href="/iphone-icon.png" />
     <link rel="apple-touch-icon" sizes="152x152" href="/ipad-icon.png" />
-    <title>東京風速</title>
+    <link rel="stylesheet" type="text/css" href="/css/styles.css"/>
 </head>
 <body>
 
@@ -43,15 +43,18 @@
             <a href="https://github.com/brianc/node-postgres">node-postgres</a></p>
         <p>Inspiration | <a href="http://hint.fm/wind/">HINT.FM wind map</a></p>
         <p>Author | Cameron Beccario <a href="https://twitter.com/cambecc">@cambecc</a></p>
+        <span>Control | </span>
+            <span class="text-button" id="show-location" tabindex="0">Show Location</span><span> – </span>
+            <span class="text-button" id="stop-animation" tabindex="0">Stop Animation</span>
         <p>Disclaimer | For entertainment only. NOT FOR NAVIGATION</p>
         <p>&nbsp;</p>
     </div>
 
-    <script src="/js/when.js" charset="utf-8" type="text/javascript"></script>
-    <script src="/js/d3.v3.js" charset="utf-8" type="text/javascript"></script>
-    <script src="/js/canvg.js" charset="utf-8" type="text/javascript"></script>
-    <script src="/js/topojson.v1.js" charset="utf-8" type="text/javascript"></script>
-    <script src="/js/air.js" charset="utf-8" type="text/javascript"></script>
+    <script src="/js/when.js" charset="utf-8"></script>
+    <script src="/js/d3.v3.js" charset="utf-8"></script>
+    <script src="/js/canvg.js" charset="utf-8"></script>
+    <script src="/js/topojson.v1.js" charset="utf-8"></script>
+    <script src="/js/air.js" charset="utf-8"></script>
 
 </body>
 </html>

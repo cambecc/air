@@ -168,7 +168,7 @@ exports.setFlexInterval = function(funcToCall, initialDelay, period, backoff, in
             i = initialRetry;
         }
         var next = Math.max(0, success ? period - start : backoff(i++));
-        log.info("scheduling for: " + next);
+        log.info("scheduling next invocation for: " + next);
         setTimeout(invoke, next);
     }
 
