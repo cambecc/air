@@ -21,14 +21,6 @@ else {
 }
 
 /**
- * Returns true if the event is a space or enter key press.
- */
-function isSpaceOrEnter(event) {
-    var key = event.keyCode || event.charCode;
-    return key == 13 || key == 32;
-}
-
-/**
  * An object to handle logging if browser supports it.
  */
 var log = function() {
@@ -60,9 +52,9 @@ var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
 topoTask.then(doProcess).then(null, log.error);
 
 var done = false;
-function stopAnimation() { done = true; }
-d3.select("#stop-animation").on("click", stopAnimation);
-d3.select("#stop-animation").on("keypress", function() { if (isSpaceOrEnter(d3.event)) stopAnimation(); });
+d3.select("#stop-animation").on("click", function() {
+    done = true;
+});
 
 /**
  * Returns a human readable string for the provided coordinates.
@@ -266,12 +258,9 @@ function doProcess(topo) {
                 .attr("d", path);
         }));
 
-    function showLocation() {
+    d3.select("#show-location").on("click", function() {
         plotCurrentPosition(mapSvg, projection);
-    }
-
-    d3.select("#show-location").on("click", showLocation);
-    d3.select("#show-location").on("keypress", function() { if (isSpaceOrEnter(d3.event)) showLocation(); });
+    });
 
     dataTask.then(function(data) {
         var features = data[0].samples.map(function(e) {
