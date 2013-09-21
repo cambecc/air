@@ -40,10 +40,10 @@ var view = function() {
 var displayDiv = document.getElementById("display");
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-var topoTask = loadJson(displayDiv.getAttribute("data-topography"));
-var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
+var topoTask = loadJson(displayDiv.getAttribute("data-topography")).then(null, displayStatus);
+var dataTask = loadJson(displayDiv.getAttribute("data-samples")).then(null, displayStatus);
 
-topoTask.then(doProcess).then(null, log.error);
+begin();
 
 var done = false;
 d3.select("#stop-animation").on("click", function() {
@@ -155,7 +155,7 @@ function calculateEngineParameters(bbox) {
     return {
         particleCount: Math.round(bbox.height / 0.14),
         particleMaxAge: 40,
-        pixelsPerUnitVelocity: bbox.height / 700,
+        pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
         fieldMaskWidth: Math.ceil(bbox.height * 0.06),
         fadeFillStyle: "rgba(0, 0, 0, 0.97)",
         frameRate: 40
@@ -168,6 +168,7 @@ function calculateEngineParameters(bbox) {
 function loadJson(resource) {
     var d = when.defer();
     d3.json(resource, function(error, result) {
+        error = error && error.status ? error.status + " " + error.response : error;
         return error ? d.reject(error) : d.resolve(result);
     });
     return d.promise;
@@ -230,7 +231,15 @@ function plotCurrentPosition(svg, projection) {
     }
 }
 
+function begin() {
+    when(topoTask).then(doProcess).then(null, log.error);
+}
+
 function doProcess(topo) {
+    if (!topo) {
+        return;
+    }
+
     log.time("building meshes");
 
     projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view.width, view.height);
@@ -284,17 +293,19 @@ function doProcess(topo) {
     });
 
     dataTask.then(function(data) {
-        var features = data[0].samples.map(function(e) {
-            return {
-                type: "Features",
-                properties: {name: e.stationId.toString()},
-                geometry: {type: "Point", coordinates: e.coordinates}};
-        });
-        path.pointRadius(1);
-        mapSvg.append("path")
-            .datum({type: "FeatureCollection", features: features})
-            .attr("class", "station")
-            .attr("d", path);
+        if (data && data.length > 0) {
+            var features = data[0].samples.map(function(e) {
+                return {
+                    type: "Features",
+                    properties: {name: e.stationId.toString()},
+                    geometry: {type: "Point", coordinates: e.coordinates}};
+            });
+            path.pointRadius(1);
+            mapSvg.append("path")
+                .datum({type: "FeatureCollection", features: features})
+                .attr("class", "station")
+                .attr("d", path);
+        }
     }).then(null, log.error);
 
     interpolateVectorField(displayMaskTask, fieldMaskTask)
@@ -310,8 +321,8 @@ function displayVectorDetails(v) {
     document.getElementById("wind").textContent = "⁂ " + formatVector(v[0], v[1]);
 }
 
-function displayTimestamp(isoDate) {
-    document.getElementById("date").textContent = "⁂ " + isoDate;
+function displayStatus(status) {
+    document.getElementById("status").textContent = "⁂ " + status;
 }
 
 /**
@@ -506,8 +517,13 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
         var displayMask = results[1];
         var fieldMask = results[2];
 
-        var date = data[0].date;
-        displayTimestamp(date);
+        if (!data || data.length == 0) {
+            displayStatus("No Data");
+            d.reject("No Data");
+            return;
+        }
+
+        displayStatus(data[0].date);
 
         var stations = buildStations(data[0].samples);
         var interpolate = idw(stations, 5);  // use the five closest neighbors to interpolate
@@ -547,7 +563,7 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
 function processVectorField(field) {
     var particles = [];
 
-    d3.select("#field-canvas").on("click", mouseClick);
+    d3.select("#display").on("click", mouseClick);
 
     function mouseClick() {
         var p = d3.mouse(this);

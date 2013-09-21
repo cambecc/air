@@ -21,15 +21,15 @@ var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-sample
 var app = express();
 app.use(express.compress({filter: compressionFilter}));
 
-var logger = express.logger;
-logger.token("headers", function(req, res) {
-    var result = "";
-    Object.keys(req.headers).forEach(function(header) {
-        result += tool.format("\n{0}: {1}", header, req.headers[header]);
-    });
-    return result + "\n----------\n" + tool.coalesce(res._header, "").trim() + "\n";
+express.logger.token("date", function() {
+    return new Date().toISOString();
 });
-app.use(logger("[:date] :remote-addr :method :url HTTP/:http-version:headers"));
+express.logger.token("response-all", function(req, res) {
+    return tool.coalesce(res._header, "").trim();
+});
+app.use(express.logger(
+    ':date - info: :remote-addr :req[cf-connecting-ip] :req[cf-ipcountry] :method :url HTTP/:http-version ' +
+    '":user-agent" :req[cf-ray]\\n:response-all\\n'));
 
 //app.get("/about/stations", function(request, response) {
 //    var result = {};
@@ -273,7 +273,7 @@ function buildResponse(rows) {
         result.push({date: tool.withZone(date, "+09:00"), samples: buckets[date]});
         mostRecent = dateMax(mostRecent, new Date(date));
     });
-    return {lastModified: mostRecent, jsonPayload: JSON.stringify(result)};
+    return {lastModified: mostRecent, jsonPayload: JSON.stringify(result), notFound: result.length === 0};
 }
 
 function doQuery(constraints) {
@@ -309,6 +309,9 @@ function query(res, constraints) {
     var queryTask = memoizedQuery(constraints);
 
     function sendResponse(data) {
+        if (data.notFound) {
+            return res.send(404);
+        }
         prepareCacheHeaders(res, data.lastModified);
         res.set("Content-Type", "application/json");
         res.send(data.jsonPayload);
