@@ -152,12 +152,13 @@ function createBoundingBox(lng0, lat0, lng1, lat1, projection) {
 }
 
 function calculateEngineParameters(bbox) {
+    var isFF = /firefox/i.test(navigator.userAgent);
     return {
         particleCount: Math.round(bbox.height / 0.14),
         particleMaxAge: 40,
         pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
-        fieldMaskWidth: Math.ceil(bbox.height * 0.06),
-        fadeFillStyle: "rgba(0, 0, 0, 0.97)",
+        fieldMaskWidth: isFF ? 2 : Math.ceil(bbox.height * 0.06),  // Wide strokes on FF are very slow.
+        fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
         frameRate: 40
     };
 }
@@ -279,11 +280,10 @@ function doProcess(topo) {
 
     var fieldMaskTask = masker(
         render(view.width, view.height, function(svg) {
-            var isFF = /firefox/i.test(navigator.userAgent);
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
-                .attr("stroke-width", isFF ? 2 : engineParameters.fieldMaskWidth)  // Wide strokes on FF are very slow.
+                .attr("stroke-width", engineParameters.fieldMaskWidth)
                 .attr("stroke", "#fff")
                 .attr("d", path);
         }));

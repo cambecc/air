@@ -16,8 +16,6 @@ var indexHTML = "./public/index.html";
 var indexHTMLText = fs.readFileSync(indexHTML, {encoding: "utf-8"});
 var indexHTMLDate = fs.statSync(indexHTML).mtime;
 
-var samplesRegex = /\/samples\/current/;  // for replacing value of 'data-samples="/samples/current"' in index.html
-
 var app = express();
 app.use(express.compress({filter: compressionFilter}));
 
@@ -320,7 +318,7 @@ function query(res, constraints) {
     return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
 }
 
-app.get("/samples/current", function(req, res) {
+app.get("/data/wind/current", function(req, res) {
     try {
         query(res, {date: {current: true, parts: [], zone: "+09:00"}});
     }
@@ -329,7 +327,7 @@ app.get("/samples/current", function(req, res) {
     }
 });
 
-app.get("/samples/:year/:month/:day/:hour", function(req, res) {
+app.get("/data/wind/:year/:month/:day/:hour", function(req, res) {
     try {
         var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
@@ -342,7 +340,7 @@ app.get("/samples/:year/:month/:day/:hour", function(req, res) {
     }
 });
 
-app.get("/map/current", function(req, res) {
+app.get("/map/wind/current", function(req, res) {
     try {
         prepareCacheHeaders(res, indexHTMLDate);
         res.send(indexHTMLText);
@@ -352,14 +350,16 @@ app.get("/map/current", function(req, res) {
     }
 });
 
-app.get("/map/:year/:month/:day/:hour", function(req, res) {
+var windRegex = /\/data\/wind\/current/;  // for replacing value of '/data/wind/current' in index.html
+
+app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
     try {
         var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
         prepareCacheHeaders(res, indexHTMLDate);
-        res.send(indexHTMLText.replace(samplesRegex, "/samples/" + parts.join("/")));
+        res.send(indexHTMLText.replace(windRegex, "/data/wind/" + parts.join("/")));
     }
     catch (error) {
         handleUnexpected(res, error);
