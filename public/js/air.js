@@ -40,8 +40,8 @@ var view = function() {
 var displayDiv = document.getElementById("display");
 var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
 var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-var topoTask = loadJson(displayDiv.getAttribute("data-topography")).then(null, displayStatus);
-var dataTask = loadJson(displayDiv.getAttribute("data-samples")).then(null, displayStatus);
+var topoTask = loadJson(displayDiv.getAttribute("data-topography"));
+var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
 
 begin();
 
@@ -164,13 +164,16 @@ function calculateEngineParameters(bbox) {
 }
 
 /**
- * Returns a promise for a JSON resource (URL) fetched via XHR.
+ * Returns a promise for a JSON resource (URL) fetched via XHR. If an error occurs, the promise resolves
+ * successfully with an error object: {error: http-status-code, message: http-status-text}}.
  */
 function loadJson(resource) {
     var d = when.defer();
     d3.json(resource, function(error, result) {
-        error = error && error.status ? error.status + " " + error.response : error;
-        return error ? d.reject(error) : d.resolve(result);
+        if (error) {
+            result = {error: error.status, message: error.statusText};
+        }
+        return d.resolve(result);
     });
     return d.promise;
 }
@@ -237,7 +240,8 @@ function begin() {
 }
 
 function doProcess(topo) {
-    if (!topo) {
+    if (topo.error) {
+        displayStatus(topo.error + " " + topo.message);
         return;
     }
 
@@ -293,7 +297,7 @@ function doProcess(topo) {
     });
 
     dataTask.then(function(data) {
-        if (data && data.length > 0) {
+        if (!data.error) {
             var features = data[0].samples.map(function(e) {
                 return {
                     type: "Features",
@@ -517,9 +521,9 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
         var displayMask = results[1];
         var fieldMask = results[2];
 
-        if (!data || data.length == 0) {
-            displayStatus("No Data");
-            d.reject("No Data");
+        if (data.error || data.length == 0) {
+            displayStatus(data.error == 404 || data.length == 0 ? "No Data" : data.error + " " + data.message);
+            d.reject(data);
             return;
         }
 

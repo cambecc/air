@@ -217,10 +217,10 @@ function parseDateParts(year, month, day, hour) {
 }
 
 /**
- * Adds headers to a response to enable caching and specify the last modified date.
+ * Adds headers to a response to enable caching and specify the last modified date and max-age (default 0).
  */
-function prepareCacheHeaders(res, lastModified) {
-    res.set("Cache-Control", "public, max-age=0");
+function prepareCacheHeaders(res, lastModified, maxAge) {
+    res.set("Cache-Control", "public, max-age=" + (maxAge || 0));
     res.set("Last-Modified", lastModified.toUTCString());
 }
 
