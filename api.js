@@ -185,7 +185,7 @@ function handleUnexpected(res, error) {
  * Returns true if the response should be compressed.
  */
 function compressionFilter(req, res) {
-    return /json|text|javascript|font|x-ttf/.test(res.getHeader('Content-Type'));
+    return /json|text|javascript|font/.test(res.getHeader('Content-Type'));
 }
 
 /**
@@ -366,9 +366,9 @@ app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
     }
 });
 
-// CF won't compress MIME type "application/x-font-ttf" but will compress "application/x-ttf".
+// CF won't compress MIME type "application/x-font-ttf" (the express.js default) but will compress "font/ttf".
 // https://support.cloudflare.com/hc/en-us/articles/200168396-What-will-CloudFlare-gzip-
-express.static.mime.define({"application/x-ttf": ["ttf"]});
+express.static.mime.define({"font/ttf": ["ttf"]});
 
 app.use(express.static(__dirname + "/public"));
 
