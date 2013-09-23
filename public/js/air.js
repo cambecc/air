@@ -262,6 +262,8 @@ function doProcess(topo) {
     log.timeEnd("building meshes");
 
     log.time("rendering map");
+    displayStatus("Rendering map...");
+
     mapSvg.append("path")
         .datum(outerBoundary)
         .attr("class", "out-boundary")
@@ -274,6 +276,7 @@ function doProcess(topo) {
 
     var displayMaskTask = masker(
         render(view.width, view.height, function(svg) {
+            displayStatus("Building display mask...");
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
@@ -284,6 +287,7 @@ function doProcess(topo) {
 
     var fieldMaskTask = masker(
         render(view.width, view.height, function(svg) {
+            displayStatus("Building field mask...");
             svg.append("path")
                 .datum(outerBoundary)
                 .attr("fill", "#fff")
@@ -527,19 +531,19 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
             return;
         }
 
-        displayStatus(data[0].date);
-
         var stations = buildStations(data[0].samples);
-        var interpolate = idw(stations, 5);  // use the five closest neighbors to interpolate
+        var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
         var field = [];
-        var x = 0;
+        var x = bbox.x;
+        var maxX = bbox.x + bbox.width;
+        var maxY = bbox.y + bbox.height;
 
         (function batchInterpolate() {
             var start = +new Date;
-            while (x < view.width) {
+            while (x < maxX) {
                 var column = field[x] = [];
-                for (var y = 0; y < view.height; y++) {
+                for (var y = bbox.y; y < maxY; y++) {
                     var v = noVector;
                     if (fieldMask(x, y)) {
                         v = [0, 0, 0];
@@ -551,11 +555,13 @@ function interpolateVectorField(displayMaskTask, fieldMaskTask) {
                 x++;
 
                 if ((+new Date - start) > 100) {  // UNDONE: magic numbers
+                    displayStatus("Interpolating: " + x + "/" + maxX);
                     setTimeout(batchInterpolate, 25);
                     return;
                 }
             }
             d.resolve(field);
+            displayStatus(data[0].date);
             log.timeEnd("interpolating field");
         })();
 

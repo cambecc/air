@@ -53,11 +53,12 @@ body {
 
 #details {
     position: absolute;
-    bottom: 5%;
+    bottom: 3%;
     left: 2%;
 }
 
 #about {
+    margin-top: 1.2em;
     position: absolute;
     left: 2%;
 }
