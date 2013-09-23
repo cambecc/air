@@ -5,31 +5,11 @@
     "use strict";
 
     var π = Math.PI;
-    var noVector = [0, 0, -1];
+
+
     var projection;
     var bbox;
     var engineParameters;
-
-    // Tweak document to distinguish CSS styling between touch and non-touch environments.
-    if ("ontouchstart" in document.documentElement) {
-        document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
-    }
-    else {
-        document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
-    }
-
-    /**
-     * An object to handle logging if browser supports it.
-     */
-    var log = function() {
-        return {
-            debug:   function(s) { if (console && console.log) console.log(s); },
-            info:    function(s) { if (console && console.info) console.info(s); },
-            error:   function(e) { if (console && console.error) console.error(e.stack ? e + "\n" + e.stack : e); },
-            time:    function(s) { if (console && console.time) console.time(s); },
-            timeEnd: function(s) { if (console && console.timeEnd) console.timeEnd(s); }
-        };
-    }();
 
     /**
      * An object {width:, height:} that is the size of the browser's view.
@@ -40,6 +20,28 @@
         var y = w.innerHeight || d.clientHeight || b.clientHeight;
         return {width: x, height: y};
     }();
+
+    /**
+     * Simple object to perform logging when the browser supports it.
+     */
+    var log = {
+        debug:   function(s) { if (console && console.log) console.log(s); },
+        info:    function(s) { if (console && console.info) console.info(s); },
+        error:   function(e) { if (console && console.error) console.error(e.stack ? e + "\n" + e.stack : e); },
+        time:    function(s) { if (console && console.time) console.time(s); },
+        timeEnd: function(s) { if (console && console.timeEnd) console.timeEnd(s); }
+    };
+
+    (function initialize() {
+    })();
+
+    // Tweak document to distinguish CSS styling between touch and non-touch environments.
+    if ("ontouchstart" in document.documentElement) {
+        document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
+    }
+    else {
+        document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
+    }
 
     var displayDiv = document.getElementById("display");
     var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
@@ -520,11 +522,27 @@
         return stations;
     }
 
+    var INVISIBLE = -1;
+    var NONE = -2;
+
+    function createField(columns) {
+        var noVector = [NaN, NaN, NONE];
+        return function(x, y) {
+            var column = columns[Math.round(x)];
+            if (column) {
+                var v = column[Math.round(y) - column[0]];
+                if (v) {
+                    return v;
+                }
+            }
+            return noVector;
+        }
+    }
+
     function interpolateVectorField(displayMaskTask, fieldMaskTask) {
         var d = when.defer();
 
         when.all([dataTask, displayMaskTask, fieldMaskTask]).then(function(results) {
-            log.time("interpolating field");
             var data = results[0];
             var displayMask = results[1];
             var fieldMask = results[2];
@@ -535,39 +553,63 @@
                 return;
             }
 
+            log.time("interpolating field");
+
             var stations = buildStations(data[0].samples);
             var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
-            var field = [];
+            var columns = [];
+            var xBound = bbox.x + bbox.width;  // upper bound (exclusive)
+            var yBound = bbox.y + bbox.height;  // upper bound (exclusive)
             var x = bbox.x;
-            var maxX = bbox.x + bbox.width;
-            var maxY = bbox.y + bbox.height;
 
-            (function batchInterpolate() {
+            function batchInterpolate() {
                 var start = +new Date;
-                while (x < maxX) {
-                    var column = field[x] = [];
-                    for (var y = bbox.y; y < maxY; y++) {
-                        var v = noVector;
-                        if (fieldMask(x, y)) {
-                            v = [0, 0, 0];
-                            v = interpolate(x, y, v);
-                            v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : -1;
+                while (x < xBound) {
+                    // Find min and max y coordinates in the column where the field mask is defined.
+                    var yMin, yMax;
+                    for (yMin = 0; yMin < yBound && !fieldMask(x, yMin); yMin++) {
+                    }
+                    for (yMax = yBound - 1; yMax > yMin && !fieldMask(x, yMax); yMax--) {
+                    }
+
+                    if (yMin <= yMax) {
+                        // Interpolate a vector for each valid y in the column. A column may have a long empty
+                        // region at the front. To save space, eliminate this empty region by encoding an
+                        // offset in the column's 0th element. A column with only three points defined at y=92,
+                        // 93 and 94, would have an offset of 91 and a length of four. The point at y=92 would
+                        // be column[92 - column[0]] === column[1].
+
+                        var column = columns[x] = [];
+                        var offset = column[0] = yMin - 1;
+                        for (var y = yMin; y <= yMax; y++) {
+                            var v = null;
+                            if (fieldMask(x, y)) {
+                                v = [0, 0, 0];
+                                v = interpolate(x, y, v);
+                                v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
+                            }
+                            column[y - offset] = v;
                         }
-                        column[y] = v;
+                    }
+                    else {
+                        columns[x] = null;
                     }
                     x++;
 
                     if ((+new Date - start) > 100) {  // UNDONE: magic numbers
-                        displayStatus("Interpolating: " + x + "/" + maxX);
+                        displayStatus("Interpolating: " + x + "/" + xBound);
                         setTimeout(batchInterpolate, 25);
                         return;
                     }
                 }
-                d.resolve(field);
+
+                d.resolve(createField(columns));
                 displayStatus(data[0].date);
                 log.timeEnd("interpolating field");
-            })();
+            }
+
+            batchInterpolate();
 
         }).then(null, log.error);
 
@@ -582,37 +624,24 @@
         function mouseClick() {
             var p = d3.mouse(this);
             var c = projection.invert(p);
-            var v = vectorAt(p[0], p[1]);
-            if (v[2] !== -1) {
+            var v = field(p[0], p[1]);
+            if (v[2] > INVISIBLE) {
                 displayCoordinates(c);
                 displayVectorDetails(v);
             }
         }
 
-        function vectorAt(x, y) {
-            var column = field[Math.round(x)];
-            if (column) {
-                var v = column[Math.round(y)];
-                if (v) {
-                    return v;
-                }
-            }
-            return noVector;
-        }
-
         function randomize(particle) {
-            var x;
-            var y;
-            var i = 30;
+            var x, y, i = 30;
             do {
                 x = bbox.x + Math.random() * bbox.width;
                 y = bbox.y + Math.random() * bbox.height;
-                if (--i == 0) {  // UNDONE: ugh. remove this safety net. make better. somehow.
+                if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
                     x = bbox.width / 2;
                     y = bbox.height / 2;
                     break;
                 }
-            } while (vectorAt(x, y) === noVector);
+            } while (field(x, y)[2] === NONE);
             particle.x = x;
             particle.y = y;
         }
@@ -659,8 +688,8 @@
                 var x = particle.x;
                 var y = particle.y;
 
-                var v = vectorAt(x, y);
-                if (v === noVector) {  // particle has gone off the field, never to return...
+                var v = field(x, y);
+                if (v[2] === NONE) {  // particle has gone off the field, never to return...
                     particle.age = engineParameters.particleMaxAge + 1;
                     return;
                 }
@@ -669,7 +698,7 @@
                 var yt = y + v[1] * engineParameters.pixelsPerUnitVelocity;
                 var m = v[2];
 
-                if (m >= 0 && vectorAt(xt, yt)[2] >= 0) {
+                if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
                     var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
                     particle.xt = xt;
                     particle.yt = yt;
