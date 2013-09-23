@@ -58,7 +58,7 @@ body {
 }
 
 #about {
-    margin-top: 1.2em;
+    margin-top: 1.25em;
     position: absolute;
     left: 2%;
 }
@@ -68,7 +68,7 @@ h1, h2 {
 }
 
 p, span {
-    font-size: 1.2em;
+    font-size: 1.25em;
 }
 
 a, .text-button {
