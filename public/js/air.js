@@ -65,18 +65,29 @@
     var topoTask = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
     var dataTask = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
 
-    var settingsTask = when(topoTask).then(function(topo) {
+    function createSettings(topo) {
         if (!topo || topo.error) {
             return null;
         }
         var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
         var bbox = createBoundingBox(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
-        var result = calculateEngineParameters(bbox, projection);
-        log.debug(JSON.stringify(result));
-        return result;
-    });
+        var isFF = /firefox/i.test(navigator.userAgent);
+        // log.debug(JSON.stringify(settings);
+        return {
+            projection: projection,
+            bbox: bbox,
+            particleCount: Math.round(bbox.height / 0.14),
+            particleMaxAge: 40,
+            pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
+            fieldMaskWidth: isFF ? 2 : Math.ceil(bbox.height * 0.06),  // Wide strokes on FF are very slow.
+            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
+            frameRate: 40
+        };
+    }
 
-    var meshTask = when.all([topoTask, settingsTask]).then(apply(function(topo, settings) {
+    var settingsTask = when(topoTask).then(createSettings);
+
+    function buildMeshes(topo, settings) {
         if (!topo || topo.error || !settings) {
             return null;
         }
@@ -90,7 +101,9 @@
             outerBoundary: outerBoundary,
             divisionBoundaries: divisionBoundaries
         };
-    }));
+    }
+
+    var meshTask = when.all([topoTask, settingsTask]).then(apply(buildMeshes));
 
     var displayMaskTask = when(meshTask).then(function(mesh) {
         if (!mesh) {
@@ -234,20 +247,6 @@
         }
     }
 
-    function calculateEngineParameters(bbox, projection) {
-        var isFF = /firefox/i.test(navigator.userAgent);
-        return {
-            projection: projection,
-            bbox: bbox,
-            particleCount: Math.round(bbox.height / 0.14),
-            particleMaxAge: 40,
-            pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
-            fieldMaskWidth: isFF ? 2 : Math.ceil(bbox.height * 0.06),  // Wide strokes on FF are very slow.
-            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
-            frameRate: 40
-        };
-    }
-
     function masker(renderTask) {
         return when(renderTask).then(function(canvas) {
             var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
@@ -300,7 +299,7 @@
         }
     }
 
-    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(function(data, mesh) {
+    function plotStations(data, mesh) {
         if (!data || data.error || !mesh) {
             return null;
         }
@@ -315,9 +314,11 @@
             .datum({type: "FeatureCollection", features: features})
             .attr("class", "station")
             .attr("d", mesh.path);
-    }));
+    }
 
-    var renderMapTask = when(meshTask).then(function(mesh) {
+    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(plotStations));
+
+    function renderMap(mesh) {
         if (!mesh) {
             return null;
         }
@@ -336,7 +337,9 @@
             .attr("d", mesh.path);
 
         log.timeEnd("rendering map");
-    });
+    }
+
+    var renderMapTask = when(meshTask).then(renderMap);
 
 //    function doProcess(topo) {
 //        if (topo.error) {
@@ -554,193 +557,194 @@
         }
     }
 
-    var interpolateTask = when.all([dataTask, settingsTask, displayMaskTask, fieldMaskTask]).then(apply(
-        function(data, settings, displayMask, fieldMask) {
-            var d = when.defer();
-            if (!settings || !displayMask || !fieldMask) {
-                return null;
-            }
+    function interpolateField(data, settings, displayMask, fieldMask) {
+        var d = when.defer();
+        if (!settings || !displayMask || !fieldMask) {
+            return null;
+        }
 
-            var bbox = settings.bbox;
+        var bbox = settings.bbox;
 
-            if (!data || data.error || data.length == 0) {
-                displayStatus(data.error == 404 || data.length == 0 ? "No Data" : data.error + " " + data.message);
-                d.reject(data);
-                return null;
-            }
+        if (!data || data.error || data.length == 0) {
+            displayStatus(data.error == 404 || data.length == 0 ? "No Data" : data.error + " " + data.message);
+            d.reject(data);
+            return null;
+        }
 
-            log.time("interpolating field");
+        log.time("interpolating field");
 
-            var stations = buildStations(data[0].samples, settings.projection);
-            var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
+        var stations = buildStations(data[0].samples, settings.projection);
+        var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
-            var columns = [];
-            var xBound = bbox.x + bbox.width;  // upper bound (exclusive)
-            var yBound = bbox.y + bbox.height;  // upper bound (exclusive)
-            var x = bbox.x;
+        var columns = [];
+        var xBound = bbox.x + bbox.width;  // upper bound (exclusive)
+        var yBound = bbox.y + bbox.height;  // upper bound (exclusive)
+        var x = bbox.x;
 
-            function batchInterpolate() {
-                var start = +new Date;
-                while (x < xBound) {
-                    // Find min and max y coordinates in the column where the field mask is defined.
-                    var yMin, yMax;
-                    for (yMin = 0; yMin < yBound && !fieldMask(x, yMin); yMin++) {
-                    }
-                    for (yMax = yBound - 1; yMax > yMin && !fieldMask(x, yMax); yMax--) {
-                    }
+        function batchInterpolate() {
+            var start = +new Date;
+            while (x < xBound) {
+                // Find min and max y coordinates in the column where the field mask is defined.
+                var yMin, yMax;
+                for (yMin = 0; yMin < yBound && !fieldMask(x, yMin); yMin++) {
+                }
+                for (yMax = yBound - 1; yMax > yMin && !fieldMask(x, yMax); yMax--) {
+                }
 
-                    if (yMin <= yMax) {
-                        // Interpolate a vector for each valid y in the column. A column may have a long empty
-                        // region at the front. To save space, eliminate this empty region by encoding an
-                        // offset in the column's 0th element. A column with only three points defined at y=92,
-                        // 93 and 94, would have an offset of 91 and a length of four. The point at y=92 would
-                        // be column[92 - column[0]] === column[1].
+                if (yMin <= yMax) {
+                    // Interpolate a vector for each valid y in the column. A column may have a long empty
+                    // region at the front. To save space, eliminate this empty region by encoding an
+                    // offset in the column's 0th element. A column with only three points defined at y=92,
+                    // 93 and 94, would have an offset of 91 and a length of four. The point at y=92 would
+                    // be column[92 - column[0]] === column[1].
 
-                        var column = columns[x] = [];
-                        var offset = column[0] = yMin - 1;
-                        for (var y = yMin; y <= yMax; y++) {
-                            var v = null;
-                            if (fieldMask(x, y)) {
-                                v = [0, 0, 0];
-                                v = interpolate(x, y, v);
-                                v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
-                            }
-                            column[y - offset] = v;
+                    var column = columns[x] = [];
+                    var offset = column[0] = yMin - 1;
+                    for (var y = yMin; y <= yMax; y++) {
+                        var v = null;
+                        if (fieldMask(x, y)) {
+                            v = [0, 0, 0];
+                            v = interpolate(x, y, v);
+                            v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
                         }
-                    }
-                    else {
-                        columns[x] = null;
-                    }
-                    x++;
-
-                    if ((+new Date - start) > MAX_TASK_TIME) {
-                        displayStatus("Interpolating: " + x + "/" + xBound);
-                        setTimeout(batchInterpolate, MIN_SLEEP);
-                        return;
+                        column[y - offset] = v;
                     }
                 }
+                else {
+                    columns[x] = null;
+                }
+                x++;
 
-                d.resolve(createField(columns));
-                displayStatus(data[0].date);
-                log.timeEnd("interpolating field");
+                if ((+new Date - start) > MAX_TASK_TIME) {
+                    displayStatus("Interpolating: " + x + "/" + xBound);
+                    setTimeout(batchInterpolate, MIN_SLEEP);
+                    return;
+                }
             }
 
-            batchInterpolate();
-
-            return d.promise;
+            d.resolve(createField(columns));
+            displayStatus(data[0].date);
+            log.timeEnd("interpolating field");
         }
-    ));
 
-    var processTask = when.all([settingsTask, interpolateTask]).then(apply(
-        function(settings, field) {
-            if (!settings || !field) {
-                return null;
-            }
+        batchInterpolate();
 
-            var particles = [];
-            var bbox = settings.bbox;
+        return d.promise;
+    }
 
-            function randomize(particle) {
-                var x, y, i = 30;
-                do {
-                    x = bbox.x + Math.random() * bbox.width;
-                    y = bbox.y + Math.random() * bbox.height;
-                    if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
-                        x = bbox.width / 2;
-                        y = bbox.height / 2;
-                        break;
-                    }
-                } while (field(x, y)[2] === NONE);
-                particle.x = x;
-                particle.y = y;
-            }
+    var interpolateTask = when.all([dataTask, settingsTask, displayMaskTask, fieldMaskTask]).then(apply(interpolateField));
 
-            for (var i = 0; i < settings.particleCount; i++) {
-                var particle = {age: Math.floor(Math.random() * settings.particleMaxAge)};
-                randomize(particle);
-                particles.push(particle);
-            }
-
-            var styles = [];
-            for (var j = 85; j <= 255; j += 5) {
-                styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
-            }
-            var max = 17;
-            var min = 0;
-            var range = max - min;
-
-            var g = asElement(d3.select(FIELD_CANVAS_ID)).getContext("2d");
-            g.lineWidth = 0.75;
-
-            (function draw() {
-                var start = +new Date;
-
-                var prev = g.globalCompositeOperation;
-                g.fillStyle = settings.fadeFillStyle;
-                g.globalCompositeOperation = "destination-in";
-                g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
-                g.globalCompositeOperation = prev;
-
-                var buckets = [];
-                for (var i = 0; i < styles.length; i++) {
-                    buckets[i] = [];
-                }
-
-                particles.forEach(function(particle) {
-                    if (particle.age > settings.particleMaxAge) {
-                        randomize(particle);
-                        particle.age = 0;
-                    }
-
-                    // get vector at current location
-                    var x = particle.x;
-                    var y = particle.y;
-
-                    var v = field(x, y);
-                    if (v[2] === NONE) {  // particle has gone off the field, never to return...
-                        particle.age = settings.particleMaxAge + 1;
-                        return;
-                    }
-
-                    var xt = x + v[0] * settings.pixelsPerUnitVelocity;
-                    var yt = y + v[1] * settings.pixelsPerUnitVelocity;
-                    var m = v[2];
-
-                    if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
-                        var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
-                        particle.xt = xt;
-                        particle.yt = yt;
-                        buckets[i].push(particle);
-                    }
-                    else {
-                        particle.x = xt;
-                        particle.y = yt;
-                    }
-                    particle.age += 1;
-                });
-
-                buckets.forEach(function(bucket, i) {
-                    if (bucket.length > 0) {
-                        g.beginPath();
-                        g.strokeStyle = styles[i];
-                        bucket.forEach(function(particle) {
-                            g.moveTo(particle.x, particle.y);
-                            g.lineTo(particle.xt, particle.yt);
-                            particle.x = particle.xt;
-                            particle.y = particle.yt;
-                        });
-                        g.stroke();
-                    }
-                });
-
-                if (!done) {
-                    var d = (+new Date - start);
-                    var next = Math.max(settings.frameRate, settings.frameRate - d);
-                    setTimeout(draw, next);
-                }
-            })();
+    function process(settings, field) {
+        if (!settings || !field) {
+            log.debug("returning");
+            return null;
         }
-    ));
+
+        var particles = [];
+        var bbox = settings.bbox;
+
+        function randomize(particle) {
+            var x, y, i = 30;
+            do {
+                x = bbox.x + Math.random() * bbox.width;
+                y = bbox.y + Math.random() * bbox.height;
+                if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
+                    x = bbox.width / 2;
+                    y = bbox.height / 2;
+                    break;
+                }
+            } while (field(x, y)[2] === NONE);
+            particle.x = x;
+            particle.y = y;
+        }
+
+        for (var i = 0; i < settings.particleCount; i++) {
+            var particle = {age: Math.floor(Math.random() * settings.particleMaxAge)};
+            randomize(particle);
+            particles.push(particle);
+        }
+
+        var styles = [];
+        for (var j = 85; j <= 255; j += 5) {
+            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+        }
+        var max = 17;
+        var min = 0;
+        var range = max - min;
+
+        var g = asElement(d3.select(FIELD_CANVAS_ID)).getContext("2d");
+        g.lineWidth = 0.75;
+
+        (function draw() {
+            var start = +new Date;
+
+            var prev = g.globalCompositeOperation;
+            g.fillStyle = settings.fadeFillStyle;
+            g.globalCompositeOperation = "destination-in";
+            g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+            g.globalCompositeOperation = prev;
+
+            var buckets = [];
+            for (var i = 0; i < styles.length; i++) {
+                buckets[i] = [];
+            }
+
+            particles.forEach(function(particle) {
+                if (particle.age > settings.particleMaxAge) {
+                    randomize(particle);
+                    particle.age = 0;
+                }
+
+                // get vector at current location
+                var x = particle.x;
+                var y = particle.y;
+
+                var v = field(x, y);
+                if (v[2] === NONE) {  // particle has gone off the field, never to return...
+                    particle.age = settings.particleMaxAge + 1;
+                    return;
+                }
+
+                var xt = x + v[0] * settings.pixelsPerUnitVelocity;
+                var yt = y + v[1] * settings.pixelsPerUnitVelocity;
+                var m = v[2];
+
+                if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
+                    var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
+                    particle.xt = xt;
+                    particle.yt = yt;
+                    buckets[i].push(particle);
+                }
+                else {
+                    particle.x = xt;
+                    particle.y = yt;
+                }
+                particle.age += 1;
+            });
+
+            buckets.forEach(function(bucket, i) {
+                if (bucket.length > 0) {
+                    g.beginPath();
+                    g.strokeStyle = styles[i];
+                    bucket.forEach(function(particle) {
+                        g.moveTo(particle.x, particle.y);
+                        g.lineTo(particle.xt, particle.yt);
+                        particle.x = particle.xt;
+                        particle.y = particle.yt;
+                    });
+                    g.stroke();
+                }
+            });
+
+            if (!done) {
+                var d = (+new Date - start);
+                var next = Math.max(settings.frameRate, settings.frameRate - d);
+                setTimeout(draw, next);
+            }
+        })();
+    }
+
+    var processTask = when.all([settingsTask, interpolateTask]).then(apply(process));
 
     function initializeDocument() {
         log.debug(JSON.stringify(view));
