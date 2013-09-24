@@ -1,28 +1,27 @@
 /**
- * License
+ * License ...
  */
 (function () {
     "use strict";
 
     var π = Math.PI;
+    var MIN_SLEEP = 25;
+    var MAX_TASK_TIME = 100;
+    var INVISIBLE = -1;  // an invisible vector
+    var NONE = -2;       // non-existent vector
 
-
-    var projection;
-    var bbox;
-    var engineParameters;
+    var MAP_SVG_ID = "#map-svg";
+    var FIELD_CANVAS_ID = "#field-canvas";
+    var DISPLAY_ID = "#display";
+    var LOCATION_ID = "#location";
+    var STATUS_ID = "#status";
+    var WIND_ID = "#wind";
+    var SHOW_LOCATION_ID = "#show-location";
+    var POSITION_ID = "#position";
+    var STOP_ANIMATION = "#stop-animation";
 
     /**
-     * An object {width:, height:} that is the size of the browser's view.
-     */
-    var view = function() {
-        var w = window, d = document.documentElement, b = document.getElementsByTagName('body')[0];
-        var x = w.innerWidth || d.clientWidth || b.clientWidth;
-        var y = w.innerHeight || d.clientHeight || b.clientHeight;
-        return {width: x, height: y};
-    }();
-
-    /**
-     * Simple object to perform logging when the browser supports it.
+     * An object to perform logging when the browser supports it.
      */
     var log = {
         debug:   function(s) { if (console && console.log) console.log(s); },
@@ -32,29 +31,107 @@
         timeEnd: function(s) { if (console && console.timeEnd) console.timeEnd(s); }
     };
 
-    (function initialize() {
-    })();
+    /**
+     * An object {width:, height:} that describes the extent of the browser's view.
+     */
+    var view = function() {
+        var w = window, d = document.documentElement, b = document.getElementsByTagName("body")[0];
+        var x = w.innerWidth || d.clientWidth || b.clientWidth;
+        var y = w.innerHeight || d.clientHeight || b.clientHeight;
+        return {width: x, height: y};
+    }();
 
-    // Tweak document to distinguish CSS styling between touch and non-touch environments.
-    if ("ontouchstart" in document.documentElement) {
-        document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
+    function apply(f) {
+        return function(array) {
+            return f.apply(null, array);
+        }
     }
-    else {
-        document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
+
+    /**
+     * Returns a promise for a JSON resource (URL) fetched via XHR. If an error occurs, the promise resolves
+     * successfully with an error object: {error: http-status-code, message: http-status-text}}.
+     */
+    function loadJson(resource) {
+        var d = when.defer();
+        d3.json(resource, function(error, result) {
+            if (error) {
+                result = {error: error.status, message: error.statusText};
+            }
+            return d.resolve(result);
+        });
+        return d.promise;
     }
 
-    var displayDiv = document.getElementById("display");
-    var mapSvg = d3.select("#map-svg").attr("width", view.width).attr("height", view.height);
-    var fieldCanvas = d3.select("#field-canvas").attr("width", view.width).attr("height", view.height)[0][0];
-    var topoTask = loadJson(displayDiv.getAttribute("data-topography"));
-    var dataTask = loadJson(displayDiv.getAttribute("data-samples"));
+    var topoTask = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
+    var dataTask = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
 
-    begin();
+    var settingsTask = when(topoTask).then(function(topo) {
+        if (!topo || topo.error) {
+            return null;
+        }
+        var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
+        var bbox = createBoundingBox(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
+        var result = calculateEngineParameters(bbox, projection);
+        log.debug(JSON.stringify(result));
+        return result;
+    });
+
+    var meshTask = when.all([topoTask, settingsTask]).then(apply(function(topo, settings) {
+        if (!topo || topo.error || !settings) {
+            return null;
+        }
+        log.time("building meshes");
+        var path = d3.geo.path().projection(settings.projection);
+        var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
+        var divisionBoundaries = topojson.mesh(topo, topo.objects.main, function (a, b) { return a !== b; });
+        log.timeEnd("building meshes");
+        return {
+            path: path,
+            outerBoundary: outerBoundary,
+            divisionBoundaries: divisionBoundaries
+        };
+    }));
+
+    var displayMaskTask = when(meshTask).then(function(mesh) {
+        if (!mesh) {
+            return null;
+        }
+        return masker(
+            render(view.width, view.height, function(svg) {
+                displayStatus("Building display mask...");
+                svg.append("path")
+                    .datum(mesh.outerBoundary)
+                    .attr("fill", "#fff")
+                    .attr("stroke-width", 2)
+                    .attr("stroke", "#000")
+                    .attr("d", mesh.path);
+            }));
+    });
+
+    var fieldMaskTask = when.all([meshTask, settingsTask]).then(apply(function(mesh, settings) {
+        if (!mesh || !settings) {
+            return null;
+        }
+        return masker(
+            render(view.width, view.height, function(svg) {
+                displayStatus("Building field mask...");
+                svg.append("path")
+                    .datum(mesh.outerBoundary)
+                    .attr("fill", "#fff")
+                    .attr("stroke-width", settings.fieldMaskWidth)
+                    .attr("stroke", "#fff")
+                    .attr("d", mesh.path);
+            }));
+    }));
 
     var done = false;
-    d3.select("#stop-animation").on("click", function() {
-        done = true;
-    });
+
+    /**
+     * Returns the DOM element for the first item of a d3 selection.
+     */
+    function asElement(d) {
+        return d[0][0];
+    }
 
     /**
      * Returns a human readable string for the provided coordinates.
@@ -122,7 +199,7 @@
      * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
      * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
      */
-    function createProjection(lng0, lat0, lng1, lat1, width, height) {
+    function createProjection(lng0, lat0, lng1, lat1, view) {
         // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
         // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
         var projection = d3.geo.albers()
@@ -136,9 +213,9 @@
         var p1 = projection([lng1, lat1]);
         // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
         // Reduce by 5% for a nice border.
-        var s = 1 / Math.max((p1[0] - p0[0]) / width, (p0[1] - p1[1]) / height) * 0.95;
+        var s = 1 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height) * 0.95;
         // Move the center to (0, 0) in pixel space.
-        var t = [width / 2, height / 2];
+        var t = [view.width / 2, view.height / 2];
 
         return projection.scale(s).translate(t);
     }
@@ -157,9 +234,11 @@
         }
     }
 
-    function calculateEngineParameters(bbox) {
+    function calculateEngineParameters(bbox, projection) {
         var isFF = /firefox/i.test(navigator.userAgent);
         return {
+            projection: projection,
+            bbox: bbox,
             particleCount: Math.round(bbox.height / 0.14),
             particleMaxAge: 40,
             pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
@@ -169,23 +248,8 @@
         };
     }
 
-    /**
-     * Returns a promise for a JSON resource (URL) fetched via XHR. If an error occurs, the promise resolves
-     * successfully with an error object: {error: http-status-code, message: http-status-text}}.
-     */
-    function loadJson(resource) {
-        var d = when.defer();
-        d3.json(resource, function(error, result) {
-            if (error) {
-                result = {error: error.status, message: error.statusText};
-            }
-            return d.resolve(result);
-        });
-        return d.promise;
-    }
-
     function masker(renderTask) {
-        return renderTask.then(function(canvas) {
+        return when(renderTask).then(function(canvas) {
             var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
             var width = canvas.width;
             return function(x, y) {
@@ -200,31 +264,22 @@
 
         setTimeout(function() {
             log.time("rendering canvas");
-
-            var div = document.createElement("div");
-            var svg = document.createElement("svg");
-            svg.setAttribute("width", width);
-            svg.setAttribute("height", height);
-            div.appendChild(svg);
-
-            appendTo(d3.select(svg));
+            var div = d3.select(document.createElement("div"));
+            var svg = div.append("svg").attr("width", width).attr("height", height);
+            appendTo(svg);
 
             var canvas = document.createElement("canvas");
-            canvas.setAttribute("width", width);
-            canvas.setAttribute("height", height);
-            canvg(canvas, div.innerHTML.trim());
-
-    //        var f = document.getElementById("field-canvas");
-    //        f.parentNode.insertBefore(canvas, f.nextSibling);
+            d3.select(canvas).attr("width", width).attr("height", height);
+            canvg(canvas, asElement(div).innerHTML.trim());
 
             log.timeEnd("rendering canvas");
             d.resolve(canvas);
-        }, 25);
+        }, MIN_SLEEP);
         return d.promise;
     }
 
-    function plotCurrentPosition(svg, projection) {
-        if (navigator.geolocation && !document.getElementById("position")) {
+    function plotCurrentPosition(projection) {
+        if (navigator.geolocation && projection && !asElement(d3.select(POSITION_ID))) {
             log.debug("requesting location...");
             navigator.geolocation.getCurrentPosition(
                 function(position) {
@@ -233,7 +288,11 @@
                     var x = Math.round(p[0]);
                     var y = Math.round(p[1]);
                     if (0 <= x && x < view.width && 0 <= y && y < view.height) {
-                        svg.append("circle").attr("cx", x).attr("cy", y).attr("r", 3).attr("id", "position");
+                        d3.select(MAP_SVG_ID).append("circle")
+                            .attr("id", POSITION_ID.substr(1))
+                            .attr("cx", x)
+                            .attr("cy", y)
+                            .attr("r", 3);
                     }
                 },
                 log.error,
@@ -241,102 +300,61 @@
         }
     }
 
-    function begin() {
-        when(topoTask).then(doProcess).then(null, log.error);
-    }
-
-    function doProcess(topo) {
-        if (topo.error) {
-            displayStatus(topo.error + " " + topo.message);
-            return;
+    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(function(data, mesh) {
+        if (!data || data.error || !mesh) {
+            return null;
         }
+        var features = data[0].samples.map(function(e) {
+            return {
+                type: "Features",
+                properties: {name: e.stationId.toString()},
+                geometry: {type: "Point", coordinates: e.coordinates}};
+        });
+        mesh.path.pointRadius(1);
+        d3.select(MAP_SVG_ID).append("path")
+            .datum({type: "FeatureCollection", features: features})
+            .attr("class", "station")
+            .attr("d", mesh.path);
+    }));
 
-        log.time("building meshes");
-
-        projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view.width, view.height);
-        bbox = createBoundingBox(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
-        engineParameters = calculateEngineParameters(bbox);
-
-        log.debug(JSON.stringify(view));
-        log.debug(JSON.stringify(bbox));
-        log.debug(JSON.stringify(engineParameters));
-
-        var path = d3.geo.path().projection(projection);
-        var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
-        var divisionBoundaries = topojson.mesh(topo, topo.objects.main, function (a, b) { return a !== b; });
-
-        log.timeEnd("building meshes");
-
+    var renderMapTask = when(meshTask).then(function(mesh) {
+        if (!mesh) {
+            return null;
+        }
         log.time("rendering map");
         displayStatus("Rendering map...");
 
+        var mapSvg = d3.select(MAP_SVG_ID);
+
         mapSvg.append("path")
-            .datum(outerBoundary)
+            .datum(mesh.outerBoundary)
             .attr("class", "out-boundary")
-            .attr("d", path);
+            .attr("d", mesh.path);
         mapSvg.append("path")
-            .datum(divisionBoundaries)
+            .datum(mesh.divisionBoundaries)
             .attr("class", "in-boundary")
-            .attr("d", path);
+            .attr("d", mesh.path);
+
         log.timeEnd("rendering map");
+    });
 
-        var displayMaskTask = masker(
-            render(view.width, view.height, function(svg) {
-                displayStatus("Building display mask...");
-                svg.append("path")
-                    .datum(outerBoundary)
-                    .attr("fill", "#fff")
-                    .attr("stroke-width", 2)
-                    .attr("stroke", "#000")
-                    .attr("d", path);
-            }));
-
-        var fieldMaskTask = masker(
-            render(view.width, view.height, function(svg) {
-                displayStatus("Building field mask...");
-                svg.append("path")
-                    .datum(outerBoundary)
-                    .attr("fill", "#fff")
-                    .attr("stroke-width", engineParameters.fieldMaskWidth)
-                    .attr("stroke", "#fff")
-                    .attr("d", path);
-            }));
-
-        d3.select("#show-location").on("click", function() {
-            plotCurrentPosition(mapSvg, projection);
-        });
-
-        dataTask.then(function(data) {
-            if (!data.error) {
-                var features = data[0].samples.map(function(e) {
-                    return {
-                        type: "Features",
-                        properties: {name: e.stationId.toString()},
-                        geometry: {type: "Point", coordinates: e.coordinates}};
-                });
-                path.pointRadius(1);
-                mapSvg.append("path")
-                    .datum({type: "FeatureCollection", features: features})
-                    .attr("class", "station")
-                    .attr("d", path);
-            }
-        }).then(null, log.error);
-
-        interpolateVectorField(displayMaskTask, fieldMaskTask)
-            .then(processVectorField)
-            .then(null, log.error);
-    }
+//    function doProcess(topo) {
+//        if (topo.error) {
+//            displayStatus(topo.error + " " + topo.message);
+//            return;
+//        }
+//    }
 
     function displayCoordinates(c) {
-        document.getElementById("location").textContent = "⁂ " + formatCoordinates(c[0], c[1]);
+        asElement(d3.select(LOCATION_ID)).textContent = "⁂ " + formatCoordinates(c[0], c[1]);
     }
 
     function displayVectorDetails(v) {
-        document.getElementById("wind").textContent = "⁂ " + formatVector(v[0], v[1]);
+        asElement(d3.select(WIND_ID)).textContent = "⁂ " + formatVector(v[0], v[1]);
     }
 
     function displayStatus(status) {
-        document.getElementById("status").textContent = "⁂ " + status;
+        asElement(d3.select(STATUS_ID)).textContent = "⁂ " + status;
     }
 
     /**
@@ -509,7 +527,7 @@
         }
     }
 
-    function buildStations(samples) {
+    function buildStations(samples, projection) {
         var stations = [];
         samples.forEach(function(sample) {
             if (sample.wind[0] && sample.wind[1]) {
@@ -521,9 +539,6 @@
         });
         return stations;
     }
-
-    var INVISIBLE = -1;
-    var NONE = -2;
 
     function createField(columns) {
         var noVector = [NaN, NaN, NONE];
@@ -539,23 +554,24 @@
         }
     }
 
-    function interpolateVectorField(displayMaskTask, fieldMaskTask) {
-        var d = when.defer();
+    var interpolateTask = when.all([dataTask, settingsTask, displayMaskTask, fieldMaskTask]).then(apply(
+        function(data, settings, displayMask, fieldMask) {
+            var d = when.defer();
+            if (!settings || !displayMask || !fieldMask) {
+                return null;
+            }
 
-        when.all([dataTask, displayMaskTask, fieldMaskTask]).then(function(results) {
-            var data = results[0];
-            var displayMask = results[1];
-            var fieldMask = results[2];
+            var bbox = settings.bbox;
 
-            if (data.error || data.length == 0) {
+            if (!data || data.error || data.length == 0) {
                 displayStatus(data.error == 404 || data.length == 0 ? "No Data" : data.error + " " + data.message);
                 d.reject(data);
-                return;
+                return null;
             }
 
             log.time("interpolating field");
 
-            var stations = buildStations(data[0].samples);
+            var stations = buildStations(data[0].samples, settings.projection);
             var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
             var columns = [];
@@ -597,9 +613,9 @@
                     }
                     x++;
 
-                    if ((+new Date - start) > 100) {  // UNDONE: magic numbers
+                    if ((+new Date - start) > MAX_TASK_TIME) {
                         displayStatus("Interpolating: " + x + "/" + xBound);
-                        setTimeout(batchInterpolate, 25);
+                        setTimeout(batchInterpolate, MIN_SLEEP);
                         return;
                     }
                 }
@@ -611,125 +627,155 @@
 
             batchInterpolate();
 
-        }).then(null, log.error);
+            return d.promise;
+        }
+    ));
 
-        return d.promise;
+    var processTask = when.all([settingsTask, interpolateTask]).then(apply(
+        function(settings, field) {
+            if (!settings || !field) {
+                return null;
+            }
+
+            var particles = [];
+            var bbox = settings.bbox;
+
+            function randomize(particle) {
+                var x, y, i = 30;
+                do {
+                    x = bbox.x + Math.random() * bbox.width;
+                    y = bbox.y + Math.random() * bbox.height;
+                    if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
+                        x = bbox.width / 2;
+                        y = bbox.height / 2;
+                        break;
+                    }
+                } while (field(x, y)[2] === NONE);
+                particle.x = x;
+                particle.y = y;
+            }
+
+            for (var i = 0; i < settings.particleCount; i++) {
+                var particle = {age: Math.floor(Math.random() * settings.particleMaxAge)};
+                randomize(particle);
+                particles.push(particle);
+            }
+
+            var styles = [];
+            for (var j = 85; j <= 255; j += 5) {
+                styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+            }
+            var max = 17;
+            var min = 0;
+            var range = max - min;
+
+            var g = asElement(d3.select(FIELD_CANVAS_ID)).getContext("2d");
+            g.lineWidth = 0.75;
+
+            (function draw() {
+                var start = +new Date;
+
+                var prev = g.globalCompositeOperation;
+                g.fillStyle = settings.fadeFillStyle;
+                g.globalCompositeOperation = "destination-in";
+                g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+                g.globalCompositeOperation = prev;
+
+                var buckets = [];
+                for (var i = 0; i < styles.length; i++) {
+                    buckets[i] = [];
+                }
+
+                particles.forEach(function(particle) {
+                    if (particle.age > settings.particleMaxAge) {
+                        randomize(particle);
+                        particle.age = 0;
+                    }
+
+                    // get vector at current location
+                    var x = particle.x;
+                    var y = particle.y;
+
+                    var v = field(x, y);
+                    if (v[2] === NONE) {  // particle has gone off the field, never to return...
+                        particle.age = settings.particleMaxAge + 1;
+                        return;
+                    }
+
+                    var xt = x + v[0] * settings.pixelsPerUnitVelocity;
+                    var yt = y + v[1] * settings.pixelsPerUnitVelocity;
+                    var m = v[2];
+
+                    if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
+                        var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
+                        particle.xt = xt;
+                        particle.yt = yt;
+                        buckets[i].push(particle);
+                    }
+                    else {
+                        particle.x = xt;
+                        particle.y = yt;
+                    }
+                    particle.age += 1;
+                });
+
+                buckets.forEach(function(bucket, i) {
+                    if (bucket.length > 0) {
+                        g.beginPath();
+                        g.strokeStyle = styles[i];
+                        bucket.forEach(function(particle) {
+                            g.moveTo(particle.x, particle.y);
+                            g.lineTo(particle.xt, particle.yt);
+                            particle.x = particle.xt;
+                            particle.y = particle.yt;
+                        });
+                        g.stroke();
+                    }
+                });
+
+                if (!done) {
+                    var d = (+new Date - start);
+                    var next = Math.max(settings.frameRate, settings.frameRate - d);
+                    setTimeout(draw, next);
+                }
+            })();
+        }
+    ));
+
+    function initializeDocument() {
+        log.debug(JSON.stringify(view));
+
+        // Tweak document to distinguish CSS styling between touch and non-touch environments.
+        if ("ontouchstart" in document.documentElement) {
+            document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
+        }
+        else {
+            document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
+        }
+
+        d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
+        d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
+        d3.select(STOP_ANIMATION).on("click", function() {
+            done = true;
+        });
+        when(settingsTask).then(function(settings) {
+            d3.select(SHOW_LOCATION_ID).on("click", function() {
+                plotCurrentPosition(settings.projection);
+            });
+        });
+        when.all([settingsTask, interpolateTask]).then(apply(function(settings, field) {
+            d3.select(DISPLAY_ID).on("click", function() {
+                var p = d3.mouse(this);
+                var c = settings.projection.invert(p);
+                var v = field(p[0], p[1]);
+                if (v[2] > INVISIBLE) {
+                    displayCoordinates(c);
+                    displayVectorDetails(v);
+                }
+            });
+        }));
     }
 
-    function processVectorField(field) {
-        var particles = [];
+    initializeDocument();
 
-        d3.select("#display").on("click", mouseClick);
-
-        function mouseClick() {
-            var p = d3.mouse(this);
-            var c = projection.invert(p);
-            var v = field(p[0], p[1]);
-            if (v[2] > INVISIBLE) {
-                displayCoordinates(c);
-                displayVectorDetails(v);
-            }
-        }
-
-        function randomize(particle) {
-            var x, y, i = 30;
-            do {
-                x = bbox.x + Math.random() * bbox.width;
-                y = bbox.y + Math.random() * bbox.height;
-                if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
-                    x = bbox.width / 2;
-                    y = bbox.height / 2;
-                    break;
-                }
-            } while (field(x, y)[2] === NONE);
-            particle.x = x;
-            particle.y = y;
-        }
-
-        for (var i = 0; i < engineParameters.particleCount; i++) {
-            var particle = {age: Math.floor(Math.random() * engineParameters.particleMaxAge)};
-            randomize(particle);
-            particles.push(particle);
-        }
-
-        var styles = [];
-        for (var j = 85; j <= 255; j += 5) {
-            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
-        }
-        var max = 17;
-        var min = 0;
-        var range = max - min;
-
-        var c = fieldCanvas;
-        var g = c.getContext("2d");
-        g.lineWidth = 0.75;
-
-        (function draw() {
-            var start = +new Date;
-
-            var prev = g.globalCompositeOperation;
-            g.fillStyle = engineParameters.fadeFillStyle;
-            g.globalCompositeOperation = "destination-in";
-            g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
-            g.globalCompositeOperation = prev;
-
-            var buckets = [];
-            for (var i = 0; i < styles.length; i++) {
-                buckets[i] = [];
-            }
-
-            particles.forEach(function(particle) {
-                if (particle.age > engineParameters.particleMaxAge) {
-                    randomize(particle);
-                    particle.age = 0;
-                }
-
-                // get vector at current location
-                var x = particle.x;
-                var y = particle.y;
-
-                var v = field(x, y);
-                if (v[2] === NONE) {  // particle has gone off the field, never to return...
-                    particle.age = engineParameters.particleMaxAge + 1;
-                    return;
-                }
-
-                var xt = x + v[0] * engineParameters.pixelsPerUnitVelocity;
-                var yt = y + v[1] * engineParameters.pixelsPerUnitVelocity;
-                var m = v[2];
-
-                if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
-                    var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
-                    particle.xt = xt;
-                    particle.yt = yt;
-                    buckets[i].push(particle);
-                }
-                else {
-                    particle.x = xt;
-                    particle.y = yt;
-                }
-                particle.age += 1;
-            });
-
-            buckets.forEach(function(bucket, i) {
-                if (bucket.length > 0) {
-                    g.beginPath();
-                    g.strokeStyle = styles[i];
-                    bucket.forEach(function(particle) {
-                        g.moveTo(particle.x, particle.y);
-                        g.lineTo(particle.xt, particle.yt);
-                        particle.x = particle.xt;
-                        particle.y = particle.yt;
-                    });
-                    g.stroke();
-                }
-            });
-
-            if (!done) {
-                var d = (+new Date - start);
-                var next = Math.max(engineParameters.frameRate, engineParameters.frameRate - d);
-                setTimeout(draw, next);
-            }
-        })();
-    }
 })();
