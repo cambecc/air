@@ -1,15 +1,19 @@
 /**
- * License ...
+ * air.js - a project to visualize air quality data for Tokyo, Japan.
+ *
+ * Copyright (c) 2013 Cameron Beccario
+ * The MIT License - http://opensource.org/licenses/MIT
  */
 (function () {
     "use strict";
 
-    var π = Math.PI;
-    var MIN_SLEEP = 25;
-    var MAX_TASK_TIME = 100;
+    var τ = 2 * Math.PI;
+    var MAX_TASK_TIME = 100;  // amount of time before a task yields control (milliseconds)
+    var MIN_SLEEP_TIME = 25;  // amount of time a task waits before resuming (milliseconds)
     var INVISIBLE = -1;  // an invisible vector
     var NONE = -2;       // non-existent vector
 
+    // special document elements
     var MAP_SVG_ID = "#map-svg";
     var FIELD_CANVAS_ID = "#field-canvas";
     var DISPLAY_ID = "#display";
@@ -19,6 +23,31 @@
     var SHOW_LOCATION_ID = "#show-location";
     var POSITION_ID = "#position";
     var STOP_ANIMATION = "#stop-animation";
+
+    /**
+     * Returns an object holding parameters for the animation engine, scaled for view size and type of browser.
+     * Many of these values are chosen because they look nice.
+     *
+     * @param topo a TopoJSON object holding geographic map data and its bounding box.
+     */
+    function createSettings(topo) {
+        var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
+        var bounds = createDisplayBounds(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
+        var isFF = /firefox/i.test(navigator.userAgent);
+        var settings = {
+            projection: projection,
+            displayBounds: bounds,
+            particleCount: Math.round(bounds.height / 0.14),
+            maxParticleAge: 40,  // max number of frames a particle is drawn before regeneration
+            velocityScale: +(bounds.height / 700).toFixed(3),  // particle speed as number of pixels per unit vector
+            fieldMaskWidth: isFF ? 2 : Math.ceil(bounds.height * 0.06),  // Wide strokes on FF are very slow
+            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
+            frameRate: 40,  // desired milliseconds per frame
+            animate: true
+        };
+        log.debug(JSON.stringify(view) + " " + JSON.stringify(settings));
+        return settings;
+    }
 
     /**
      * An object to perform logging when the browser supports it.
@@ -32,7 +61,7 @@
     };
 
     /**
-     * An object {width:, height:} that describes the extent of the browser's view.
+     * An object {width:, height:} that describes the extent of the browser's view in pixels.
      */
     var view = function() {
         var w = window, d = document.documentElement, b = document.getElementsByTagName("body")[0];
@@ -41,56 +70,83 @@
         return {width: x, height: y};
     }();
 
-    function apply(f) {
-        return function(array) {
-            return f.apply(null, array);
+    /**
+     * Returns a d3 Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
+     * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
+     * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
+     */
+    function createProjection(lng0, lat0, lng1, lat1, view) {
+        // Construct a unit projection centered on the bounding box. NOTE: center calculation will not be correct
+        // when the bounding box crosses the 180th meridian. Don't expect that to happen to Japan for a while yet...
+        var projection = d3.geo.albers()
+            .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
+            .center([0, (lat0 + lat1) / 2])    // set the globe vertically on the bounding box's center.
+            .scale(1)
+            .translate([0, 0]);
+
+        // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
+        var p0 = projection([lng0, lat0]);
+        var p1 = projection([lng1, lat1]);
+        // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
+        // Reduce by 5% for a nice border.
+        var s = 1 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height) * 0.95;
+        // Move the center to (0, 0) in pixel space.
+        var t = [view.width / 2, view.height / 2];
+
+        return projection.scale(s).translate(t);
+    }
+
+    /**
+     * Returns an object that describes the location and size of the map displayed on screen.
+     */
+    function createDisplayBounds(lng0, lat0, lng1, lat1, projection) {
+        var upperLeft = projection([lng0, lat1]).map(Math.floor);
+        var lowerRight = projection([lng1, lat0]).map(Math.ceil);
+        return {
+            x: upperLeft[0],
+            y: upperLeft[1],
+            width: lowerRight[0] - upperLeft[0] + 1,
+            height: lowerRight[1] - upperLeft[1] + 1
         }
     }
 
     /**
-     * Returns a promise for a JSON resource (URL) fetched via XHR. If an error occurs, the promise resolves
-     * successfully with an error object: {error: http-status-code, message: http-status-text}}.
+     * Returns a promise for a JSON resource (URL) fetched via XHR. If the load fails, the promise rejects
+     * with an object describing the reason: {error: http-status-code, message: http-status-text, resource:}.
      */
     function loadJson(resource) {
         var d = when.defer();
         d3.json(resource, function(error, result) {
-            if (error) {
-                result = {error: error.status, message: error.statusText};
-            }
-            return d.resolve(result);
+            return error ?
+                d.reject({error: error.status, message: error.statusText, resource: resource}) :
+                d.resolve(result);
         });
         return d.promise;
     }
 
-    var topoTask = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
-    var dataTask = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
-
-    function createSettings(topo) {
-        if (!topo || topo.error) {
-            return null;
+    /**
+     * Returns a function that takes an array and applies it as arguments to the specified function. Yup.
+     */
+    function apply(f) {
+        return function(args) {
+            return f.apply(null, args);
         }
-        var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
-        var bbox = createBoundingBox(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
-        var isFF = /firefox/i.test(navigator.userAgent);
-        // log.debug(JSON.stringify(settings);
-        return {
-            projection: projection,
-            bbox: bbox,
-            particleCount: Math.round(bbox.height / 0.14),
-            particleMaxAge: 40,
-            pixelsPerUnitVelocity: +(bbox.height / 700).toFixed(3),
-            fieldMaskWidth: isFF ? 2 : Math.ceil(bbox.height * 0.06),  // Wide strokes on FF are very slow.
-            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
-            frameRate: 40
-        };
     }
 
-    var settingsTask = when(topoTask).then(createSettings);
+    /**
+     * Returns a promise that resolves to the specified value after a short nap.
+     */
+    function nap(value) {
+        var d = when.defer();
+        setTimeout(function() { d.resolve(value); }, MIN_SLEEP_TIME);
+        return d.promise;
+    }
+
+    function displayStatus(status) {
+        d3.select(STATUS_ID).node().textContent = "⁂ " + status;
+    }
 
     function buildMeshes(topo, settings) {
-        if (!topo || topo.error || !settings) {
-            return null;
-        }
         log.time("building meshes");
         var path = d3.geo.path().projection(settings.projection);
         var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
@@ -103,65 +159,108 @@
         };
     }
 
-    var meshTask = when.all([topoTask, settingsTask]).then(apply(buildMeshes));
-
-    var displayMaskTask = when(meshTask).then(function(mesh) {
-        if (!mesh) {
-            return null;
-        }
-        return masker(
-            render(view.width, view.height, function(svg) {
-                displayStatus("Building display mask...");
-                svg.append("path")
-                    .datum(mesh.outerBoundary)
-                    .attr("fill", "#fff")
-                    .attr("stroke-width", 2)
-                    .attr("stroke", "#000")
-                    .attr("d", mesh.path);
-            }));
-    });
-
-    var fieldMaskTask = when.all([meshTask, settingsTask]).then(apply(function(mesh, settings) {
-        if (!mesh || !settings) {
-            return null;
-        }
-        return masker(
-            render(view.width, view.height, function(svg) {
-                displayStatus("Building field mask...");
-                svg.append("path")
-                    .datum(mesh.outerBoundary)
-                    .attr("fill", "#fff")
-                    .attr("stroke-width", settings.fieldMaskWidth)
-                    .attr("stroke", "#fff")
-                    .attr("d", mesh.path);
-            }));
-    }));
-
-    var done = false;
-
-    /**
-     * Returns the DOM element for the first item of a d3 selection.
-     */
-    function asElement(d) {
-        return d[0][0];
+    function renderMap(mesh) {
+        displayStatus("Rendering map...");
+        log.time("rendering map");
+        var mapSvg = d3.select(MAP_SVG_ID);
+        mapSvg.append("path").datum(mesh.outerBoundary).attr("class", "out-boundary").attr("d", mesh.path);
+        mapSvg.append("path").datum(mesh.divisionBoundaries).attr("class", "in-boundary").attr("d", mesh.path);
+        log.timeEnd("rendering map");
     }
 
-    /**
-     * Returns a human readable string for the provided coordinates.
-     */
-    function formatCoordinates(lng, lat) {
-        return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
-               Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+    function selectNewSvg(width, height) {
+        return d3.select(document.createElement("div")).append("svg").attr("width", width).attr("height", height);
     }
 
-    /**
-     * Returns a human readable string for the provided rectangular wind vector.
-     */
-    function formatVector(x, y) {
-        var d = Math.atan2(-x, y) / π * 180;  // calculate into-the-wind cardinal degrees
-        var wd = Math.round((d + 360) % 360 / 5) * 5;  // shift [-180, 180] to [0, 360], and round to nearest 5.
-        var m = Math.sqrt(x * x + y * y);
-        return wd.toFixed(0) + "º @ " + m.toFixed(1) + " m/s";
+    function renderDisplayMask(mesh) {
+        displayStatus("Building display mask...");
+        log.time("display mask");
+        var maskSvg = selectNewSvg(view.width, view.height);
+        maskSvg.append("path")
+            .datum(mesh.outerBoundary)
+            .attr("fill", "#fff")
+            .attr("stroke-width", 2)
+            .attr("stroke", "#000")
+            .attr("d", mesh.path);
+        log.timeEnd("display mask");
+        return maskSvg;
+    }
+
+    function renderFieldMask(mesh, settings) {
+        displayStatus("Building field mask...");
+        log.time("field mask");
+        var maskSvg = selectNewSvg(view.width, view.height);
+        maskSvg.append("path")
+            .datum(mesh.outerBoundary)
+            .attr("fill", "#fff")
+            .attr("stroke-width", settings.fieldMaskWidth)
+            .attr("stroke", "#fff")
+            .attr("d", mesh.path);
+        log.timeEnd("field mask");
+        return maskSvg;
+    }
+
+    function createMasker(svg) {
+        log.time("rendering to canvas");
+        var canvas = document.createElement("canvas");
+        d3.select(canvas).attr("width", svg.attr("width")).attr("height", svg.attr("height"));
+        canvg(canvas, svg.node().parentNode.innerHTML.trim());
+        var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+        var width = canvas.width;
+        log.timeEnd("rendering to canvas");
+        return function(x, y) {
+            var i = (y * width + x) * 4;
+            return data[i] > 0;
+        }
+    }
+
+    function render(mesh, settings) {
+        var mapTask = when(renderMap(mesh))
+            .then(nap);
+        var displayMaskTask = mapTask.then(renderDisplayMask.bind(null, mesh))
+            .then(nap)
+            .then(createMasker)
+            .then(nap);
+        var fieldMaskTask = displayMaskTask.then(renderFieldMask.bind(null, mesh, settings))
+            .then(nap)
+            .then(createMasker)
+            .then(nap);
+        return when.all([displayMaskTask, fieldMaskTask]).then(function(args) {
+            return {displayMask: args[0], fieldMask: args[1]};
+        });
+    }
+
+    function plotStations(data, mesh) {
+        var features = data[0].samples.map(function(e) {
+            return {
+                type: "Features",
+                properties: {name: e.stationId.toString()},
+                geometry: {type: "Point", coordinates: e.coordinates}};
+        });
+        mesh.path.pointRadius(1);
+        d3.select(MAP_SVG_ID).append("path")
+            .datum({type: "FeatureCollection", features: features})
+            .attr("class", "station")
+            .attr("d", mesh.path);
+    }
+
+    function plotCurrentPosition(projection) {
+        if (navigator.geolocation && projection && !d3.select(POSITION_ID).node()) {
+            log.debug("requesting location...");
+            navigator.geolocation.getCurrentPosition(
+                function(position) {
+                    log.debug("position available");
+                    var p = projection([position.coords.longitude, position.coords.latitude]);
+                    var x = Math.round(p[0]);
+                    var y = Math.round(p[1]);
+                    if (0 <= x && x < view.width && 0 <= y && y < view.height) {
+                        var id = POSITION_ID.substr(1);
+                        d3.select(MAP_SVG_ID).append("circle").attr("id", id).attr("cx", x).attr("cy", y).attr("r", 5);
+                    }
+                },
+                log.error,
+                {enableHighAccuracy: true});
+        }
     }
 
     /**
@@ -189,175 +288,6 @@
         var Δx = p0[0] - p1[0];
         var Δy = p0[1] - p1[1];
         return Δx * Δx + Δy * Δy;
-    }
-
-    /**
-     * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector
-     * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
-     * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
-     * would point _to_ the SE (lower right).
-     */
-    function polarToRectangular(v) {
-        var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
-        var cr = wd_deg / 180 * π;  // convert to cardinal radians, clockwise
-        var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // convert to standard radians, counter-clockwise
-        var wv = v[1];  // wind velocity
-        var x = Math.cos(wd_rad) * wv;
-        var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space grows downwards
-        return [x, y];  // rectangular form wind vector in pixel space
-    }
-
-    /**
-     * Returns an Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
-     * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
-     * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
-     */
-    function createProjection(lng0, lat0, lng1, lat1, view) {
-        // Construct a unit projection centered on the bounding box. NOTE: calculation of the center will not
-        // be correct if the bounding box crosses the 180th meridian. But don't expect that to happen...
-        var projection = d3.geo.albers()
-            .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
-            .center([0, (lat0 + lat1) / 2])    // set the globe vertically on the bounding box's center.
-            .scale(1)
-            .translate([0, 0]);
-
-        // Project the two longitude/latitude points into pixel space. These will be tiny because scale is 1.
-        var p0 = projection([lng0, lat0]);
-        var p1 = projection([lng1, lat1]);
-        // The actual scale is the ratio between the size of the bounding box in pixels and the size of the view port.
-        // Reduce by 5% for a nice border.
-        var s = 1 / Math.max((p1[0] - p0[0]) / view.width, (p0[1] - p1[1]) / view.height) * 0.95;
-        // Move the center to (0, 0) in pixel space.
-        var t = [view.width / 2, view.height / 2];
-
-        return projection.scale(s).translate(t);
-    }
-
-    function createBoundingBox(lng0, lat0, lng1, lat1, projection) {
-        var upperLeft = projection([lng0, lat1]).map(Math.floor);
-        var lowerRight = projection([lng1, lat0]).map(Math.ceil);
-        var width = lowerRight[0] - upperLeft[0] + 1;
-        var height = lowerRight[1] - upperLeft[1] + 1;
-        return {
-            x: upperLeft[0],
-            y: upperLeft[1],
-            width: width,
-            height: height,
-            area: width * height
-        }
-    }
-
-    function masker(renderTask) {
-        return when(renderTask).then(function(canvas) {
-            var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
-            var width = canvas.width;
-            return function(x, y) {
-                var i = (y * width + x) * 4;
-                return data[i] > 0;
-            }
-        });
-    }
-
-    function render(width, height, appendTo) {
-        var d = when.defer();
-
-        setTimeout(function() {
-            log.time("rendering canvas");
-            var div = d3.select(document.createElement("div"));
-            var svg = div.append("svg").attr("width", width).attr("height", height);
-            appendTo(svg);
-
-            var canvas = document.createElement("canvas");
-            d3.select(canvas).attr("width", width).attr("height", height);
-            canvg(canvas, asElement(div).innerHTML.trim());
-
-            log.timeEnd("rendering canvas");
-            d.resolve(canvas);
-        }, MIN_SLEEP);
-        return d.promise;
-    }
-
-    function plotCurrentPosition(projection) {
-        if (navigator.geolocation && projection && !asElement(d3.select(POSITION_ID))) {
-            log.debug("requesting location...");
-            navigator.geolocation.getCurrentPosition(
-                function(position) {
-                    log.debug("position available");
-                    var p = projection([position.coords.longitude, position.coords.latitude]);
-                    var x = Math.round(p[0]);
-                    var y = Math.round(p[1]);
-                    if (0 <= x && x < view.width && 0 <= y && y < view.height) {
-                        d3.select(MAP_SVG_ID).append("circle")
-                            .attr("id", POSITION_ID.substr(1))
-                            .attr("cx", x)
-                            .attr("cy", y)
-                            .attr("r", 3);
-                    }
-                },
-                log.error,
-                {enableHighAccuracy: true});
-        }
-    }
-
-    function plotStations(data, mesh) {
-        if (!data || data.error || !mesh) {
-            return null;
-        }
-        var features = data[0].samples.map(function(e) {
-            return {
-                type: "Features",
-                properties: {name: e.stationId.toString()},
-                geometry: {type: "Point", coordinates: e.coordinates}};
-        });
-        mesh.path.pointRadius(1);
-        d3.select(MAP_SVG_ID).append("path")
-            .datum({type: "FeatureCollection", features: features})
-            .attr("class", "station")
-            .attr("d", mesh.path);
-    }
-
-    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(plotStations));
-
-    function renderMap(mesh) {
-        if (!mesh) {
-            return null;
-        }
-        log.time("rendering map");
-        displayStatus("Rendering map...");
-
-        var mapSvg = d3.select(MAP_SVG_ID);
-
-        mapSvg.append("path")
-            .datum(mesh.outerBoundary)
-            .attr("class", "out-boundary")
-            .attr("d", mesh.path);
-        mapSvg.append("path")
-            .datum(mesh.divisionBoundaries)
-            .attr("class", "in-boundary")
-            .attr("d", mesh.path);
-
-        log.timeEnd("rendering map");
-    }
-
-    var renderMapTask = when(meshTask).then(renderMap);
-
-//    function doProcess(topo) {
-//        if (topo.error) {
-//            displayStatus(topo.error + " " + topo.message);
-//            return;
-//        }
-//    }
-
-    function displayCoordinates(c) {
-        asElement(d3.select(LOCATION_ID)).textContent = "⁂ " + formatCoordinates(c[0], c[1]);
-    }
-
-    function displayVectorDetails(v) {
-        asElement(d3.select(WIND_ID)).textContent = "⁂ " + formatVector(v[0], v[1]);
-    }
-
-    function displayStatus(status) {
-        asElement(d3.select(STATUS_ID)).textContent = "⁂ " + status;
     }
 
     /**
@@ -530,6 +460,40 @@
         }
     }
 
+    /**
+     * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector
+     * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
+     * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
+     * would point _to_ the SE (lower right).
+     */
+    function polarToRectangular(v) {
+        var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
+        var cr = wd_deg / 360 * τ;  // convert to cardinal radians, clockwise
+        var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // convert to standard radians, counter-clockwise
+        var wv = v[1];  // wind velocity
+        var x = Math.cos(wd_rad) * wv;
+        var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space grows downwards
+        return [x, y];  // rectangular form wind vector in pixel space
+    }
+
+    /**
+     * Returns a human readable string for the provided rectangular wind vector.
+     */
+    function formatVector(x, y) {
+        var d = Math.atan2(-x, y) / τ * 360;  // calculate into-the-wind cardinal degrees
+        var wd = Math.round((d + 360) % 360 / 5) * 5;  // shift [-180, 180] to [0, 360], and round to nearest 5.
+        var m = Math.sqrt(x * x + y * y);
+        return wd.toFixed(0) + "º @ " + m.toFixed(1) + " m/s";
+    }
+
+    /**
+     * Returns a human readable string for the provided coordinates.
+     */
+    function formatCoordinates(lng, lat) {
+        return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
+               Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+    }
+
     function buildStations(samples, projection) {
         var stations = [];
         samples.forEach(function(sample) {
@@ -557,29 +521,24 @@
         }
     }
 
-    function interpolateField(data, settings, displayMask, fieldMask) {
-        var d = when.defer();
-        if (!settings || !displayMask || !fieldMask) {
-            return null;
-        }
-
-        var bbox = settings.bbox;
-
-        if (!data || data.error || data.length == 0) {
-            displayStatus(data.error == 404 || data.length == 0 ? "No Data" : data.error + " " + data.message);
-            d.reject(data);
-            return null;
-        }
-
+    function interpolateField(data, settings, masks) {
         log.time("interpolating field");
+        var d = when.defer();
+        var bounds = settings.displayBounds;
+        var displayMask = masks.displayMask;
+        var fieldMask = masks.fieldMask;
+
+        if (data.length === 0) {
+            return d.reject("No Data in Response");
+        }
 
         var stations = buildStations(data[0].samples, settings.projection);
         var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
         var columns = [];
-        var xBound = bbox.x + bbox.width;  // upper bound (exclusive)
-        var yBound = bbox.y + bbox.height;  // upper bound (exclusive)
-        var x = bbox.x;
+        var xBound = bounds.x + bounds.width;  // upper bound (exclusive)
+        var yBound = bounds.y + bounds.height;  // upper bound (exclusive)
+        var x = bounds.x;
 
         function batchInterpolate() {
             var start = +new Date;
@@ -617,7 +576,7 @@
 
                 if ((+new Date - start) > MAX_TASK_TIME) {
                     displayStatus("Interpolating: " + x + "/" + xBound);
-                    setTimeout(batchInterpolate, MIN_SLEEP);
+                    setTimeout(batchInterpolate, MIN_SLEEP_TIME);
                     return;
                 }
             }
@@ -632,25 +591,18 @@
         return d.promise;
     }
 
-    var interpolateTask = when.all([dataTask, settingsTask, displayMaskTask, fieldMaskTask]).then(apply(interpolateField));
-
     function process(settings, field) {
-        if (!settings || !field) {
-            log.debug("returning");
-            return null;
-        }
-
         var particles = [];
-        var bbox = settings.bbox;
+        var bounds = settings.displayBounds;
 
         function randomize(particle) {
             var x, y, i = 30;
             do {
-                x = bbox.x + Math.random() * bbox.width;
-                y = bbox.y + Math.random() * bbox.height;
-                if (--i == 0) {  // Ugh. How to efficiently pick a random point inside an arbitrary polygon?
-                    x = bbox.width / 2;
-                    y = bbox.height / 2;
+                x = bounds.x + Math.random() * bounds.width;
+                y = bounds.y + Math.random() * bounds.height;
+                if (--i == 0) {  // Ugh. How to efficiently pick a random point within a polygon?
+                    x = bounds.width / 2;
+                    y = bounds.height / 2;
                     break;
                 }
             } while (field(x, y)[2] === NONE);
@@ -659,7 +611,7 @@
         }
 
         for (var i = 0; i < settings.particleCount; i++) {
-            var particle = {age: Math.floor(Math.random() * settings.particleMaxAge)};
+            var particle = {age: Math.floor(Math.random() * settings.maxParticleAge)};
             randomize(particle);
             particles.push(particle);
         }
@@ -672,7 +624,7 @@
         var min = 0;
         var range = max - min;
 
-        var g = asElement(d3.select(FIELD_CANVAS_ID)).getContext("2d");
+        var g = d3.select(FIELD_CANVAS_ID).node().getContext("2d");
         g.lineWidth = 0.75;
 
         (function draw() {
@@ -681,7 +633,7 @@
             var prev = g.globalCompositeOperation;
             g.fillStyle = settings.fadeFillStyle;
             g.globalCompositeOperation = "destination-in";
-            g.fillRect(bbox.x, bbox.y, bbox.width, bbox.height);
+            g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
             g.globalCompositeOperation = prev;
 
             var buckets = [];
@@ -690,7 +642,7 @@
             }
 
             particles.forEach(function(particle) {
-                if (particle.age > settings.particleMaxAge) {
+                if (particle.age > settings.maxParticleAge) {
                     randomize(particle);
                     particle.age = 0;
                 }
@@ -701,12 +653,12 @@
 
                 var v = field(x, y);
                 if (v[2] === NONE) {  // particle has gone off the field, never to return...
-                    particle.age = settings.particleMaxAge + 1;
+                    particle.age = settings.maxParticleAge + 1;
                     return;
                 }
 
-                var xt = x + v[0] * settings.pixelsPerUnitVelocity;
-                var yt = y + v[1] * settings.pixelsPerUnitVelocity;
+                var xt = x + v[0] * settings.velocityScale;
+                var yt = y + v[1] * settings.velocityScale;
                 var m = v[2];
 
                 if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
@@ -736,7 +688,7 @@
                 }
             });
 
-            if (!done) {
+            if (settings.animate) {
                 var d = (+new Date - start);
                 var next = Math.max(settings.frameRate, settings.frameRate - d);
                 setTimeout(draw, next);
@@ -744,42 +696,66 @@
         })();
     }
 
+    function report(e) {
+        log.error(e);
+        displayStatus(e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
+    }
+
+    var topoTask = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
+    var dataTask = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
+    var initializeTask = when(true).then(initializeDocument);
+    var settingsTask = when(topoTask).then(createSettings);
+    var meshTask = when.all([topoTask, settingsTask]).then(apply(buildMeshes));
+    var renderTask = when.all([meshTask, settingsTask]).then(apply(render));
+    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(plotStations));
+    var interpolateTask = when.all([dataTask, settingsTask, renderTask]).then(apply(interpolateField));
     var processTask = when.all([settingsTask, interpolateTask]).then(apply(process));
 
-    function initializeDocument() {
-        log.debug(JSON.stringify(view));
+    // Register a catch-all error handler.
+    when.all([
+        topoTask,
+        dataTask,
+        initializeTask,
+        settingsTask,
+        meshTask,
+        renderTask,
+        plotStationsTask,
+        interpolateTask,
+        processTask]).then(null, report);
 
+    function initializeDocument() {
         // Tweak document to distinguish CSS styling between touch and non-touch environments.
         if ("ontouchstart" in document.documentElement) {
             document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
         }
         else {
-            document.documentElement.className += " no-touch";  // class .no-touch can filter styles problematic for touch
+            document.documentElement.className += " no-touch";  // to filter styles problematic for touch
         }
 
+        // Set the size of the map and field elements.
         d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
         d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
-        d3.select(STOP_ANIMATION).on("click", function() {
-            done = true;
-        });
-        when(settingsTask).then(function(settings) {
+
+        // Register event handlers.
+        when.all([settingsTask, interpolateTask]).then(apply(function(settings, field) {
             d3.select(SHOW_LOCATION_ID).on("click", function() {
                 plotCurrentPosition(settings.projection);
             });
-        });
-        when.all([settingsTask, interpolateTask]).then(apply(function(settings, field) {
+            d3.select(STOP_ANIMATION).on("click", function() {
+                settings.animate = false;
+            });
             d3.select(DISPLAY_ID).on("click", function() {
                 var p = d3.mouse(this);
                 var c = settings.projection.invert(p);
                 var v = field(p[0], p[1]);
-                if (v[2] > INVISIBLE) {
-                    displayCoordinates(c);
-                    displayVectorDetails(v);
+                if (v[2] >= INVISIBLE) {
+                    d3.select(LOCATION_ID).node().textContent = "⁂ " + formatCoordinates(c[0], c[1]);
+                    d3.select(WIND_ID).node().textContent = "⁂ " + formatVector(v[0], v[1]);
                 }
             });
-        }));
+        })).then(null, report);
     }
 
-    initializeDocument();
-
 })();
+
+// what the... you read this far? :)

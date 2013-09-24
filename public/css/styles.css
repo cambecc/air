@@ -38,7 +38,9 @@ body {
 }
 
 #position {
-    fill: #3aff3a;
+    fill: none;
+    stroke: #3aff3a;
+    stroke-width: 1.5;
 }
 
 #display {
@@ -68,7 +70,7 @@ h1, h2 {
 }
 
 p, span {
-    font-size: 1.25em;
+    font-size: 1.75em;
 }
 
 a, .text-button {
