@@ -99,7 +99,7 @@ topojson = (function() {
           geom;
 
       function arc(i) {
-        if (i < 0) i = ~i;
+        if (i < 0) i = -i - 1;  // see https://code.google.com/p/chromium/issues/detail?id=298040
         (geomsByArc[i] || (geomsByArc[i] = [])).push(geom);
       }
 
