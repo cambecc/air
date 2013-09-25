@@ -174,8 +174,15 @@
         return min + Math.random() * (max - min);
     }
 
-    function displayStatus(status) {
-        d3.select(STATUS_ID).node().textContent = "⁂ " + status;
+    var bad = false;
+    function displayStatus(status, error) {
+        if (error) {
+            bad = true;  // errors are sticky--let's not overwrite error information if it occurs
+            d3.select(STATUS_ID).node().textContent = "⁂ " + error;
+        }
+        else if (!bad) {
+            d3.select(STATUS_ID).node().textContent = "⁂ " + status;
+        }
     }
 
     function buildMeshes(topo, settings) {
@@ -660,28 +667,27 @@
             }
         }
 
-        function batchInterpolate() {
-            var start = +new Date;
-            while (x < xBound) {
-                columns[x] = interpolateColumn(x);
-                x += 1;
-                if ((+new Date - start) > MAX_TASK_TIME) {
-                    // Interpolation is taking too long. Schedule the next batch for later and yield.
-                    displayStatus("Interpolating: " + x + "/" + xBound);
-                    nextBatch();
-                    return;
+        (function batchInterpolate() {
+            try {
+                var start = +new Date;
+                while (x < xBound) {
+                    columns[x] = interpolateColumn(x);
+                    x += 1;
+                    if ((+new Date - start) > MAX_TASK_TIME) {
+                        // Interpolation is taking too long. Schedule the next batch for later and yield.
+                        displayStatus("Interpolating: " + x + "/" + xBound);
+                        setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+                        return;
+                    }
                 }
+                displayStatus(data[0].date.replace(":00+09:00", " JST"));
+                d.resolve(createField(columns));
+                log.timeEnd("interpolating field");
             }
-            d.resolve(createField(columns));
-            displayStatus(data[0].date.replace(":00+09:00", " JST"));
-            log.timeEnd("interpolating field");
-        }
-
-        function nextBatch() {
-            nap().then(batchInterpolate).then(null, function(error) { d.reject(error); });
-        }
-
-        nextBatch();
+            catch (e) {
+                d.reject(e);
+            }
+        })();
 
         return d.promise;
     }
@@ -800,7 +806,7 @@
 
     function report(e) {
         log.error(e);
-        displayStatus(e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
+        displayStatus(null, e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
     }
 
     // Let's try an experiment! Define a dependency graph of tasks and use promises to let the control flow occur
