@@ -1,8 +1,9 @@
 /**
- * air.js - a project to visualize air quality data for Tokyo, Japan.
+ * air.js - a project to visualize air quality data for Tokyo.
  *
  * Copyright (c) 2013 Cameron Beccario
  * The MIT License - http://opensource.org/licenses/MIT
+ * https://github.com/cambecc/air
  */
 (function () {
     "use strict";
@@ -77,10 +78,10 @@
      */
     function createProjection(lng0, lat0, lng1, lat1, view) {
         // Construct a unit projection centered on the bounding box. NOTE: center calculation will not be correct
-        // when the bounding box crosses the 180th meridian. Don't expect that to happen to Japan for a while yet...
+        // when the bounding box crosses the 180th meridian. Don't expect that to happen to Tokyo for a while...
         var projection = d3.geo.albers()
-            .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center.
-            .center([0, (lat0 + lat1) / 2])    // set the globe vertically on the bounding box's center.
+            .rotate([-((lng0 + lng1) / 2), 0]) // rotate the globe from the prime meridian to the bounding box's center
+            .center([0, (lat0 + lat1) / 2])    // set the globe vertically on the bounding box's center
             .scale(1)
             .translate([0, 0]);
 
@@ -111,8 +112,8 @@
     }
 
     /**
-     * Returns a promise for a JSON resource (URL) fetched via XHR. If the load fails, the promise rejects
-     * with an object describing the reason: {error: http-status-code, message: http-status-text, resource:}.
+     * Returns a promise for a JSON resource (URL) fetched via XHR. If the load fails, the promise rejects with an
+     * object describing the reason: {error: http-status-code, message: http-status-text, resource:}.
      */
     function loadJson(resource) {
         var d = when.defer();
@@ -147,6 +148,7 @@
     }
 
     function buildMeshes(topo, settings) {
+        displayStatus("building meshes...");
         log.time("building meshes");
         var path = d3.geo.path().projection(settings.projection);
         var outerBoundary = topojson.mesh(topo, topo.objects.main, function(a, b) { return a === b; });
@@ -168,17 +170,42 @@
         log.timeEnd("rendering map");
     }
 
+    /**
+     * Returns a new detached SVG element inside a DIV, to be used as "scratch space" for rendering masks.
+     */
     function selectNewSvg(width, height) {
         return d3.select(document.createElement("div")).append("svg").attr("width", width).attr("height", height);
     }
 
+    /**
+     * Returns a detached SVG element of the map filled with red and having very wide red borders, defining the area
+     * where the wind vector field is available. The wide borders allow the vector field to extend beyond the borders
+     * of the visible map, providing a more natural looking animation.
+     */
+    function renderFieldMask(mesh, settings) {
+        displayStatus("Rendering field mask...");
+        log.time("field mask");
+        var maskSvg = selectNewSvg(view.width, view.height);
+        maskSvg.append("path")
+            .datum(mesh.outerBoundary)
+            .attr("fill", "#f00")
+            .attr("stroke-width", settings.fieldMaskWidth)
+            .attr("stroke", "#f00")
+            .attr("d", mesh.path);
+        log.timeEnd("field mask");
+        return maskSvg;
+    }
+
+    /**
+     * Returns a detached SVG element of the map filled with red, defining the area where the animation is visible.
+     */
     function renderDisplayMask(mesh) {
-        displayStatus("Building display mask...");
+        displayStatus("Rendering display mask...");
         log.time("display mask");
         var maskSvg = selectNewSvg(view.width, view.height);
         maskSvg.append("path")
             .datum(mesh.outerBoundary)
-            .attr("fill", "#fff")
+            .attr("fill", "#f00")
             .attr("stroke-width", 2)
             .attr("stroke", "#000")
             .attr("d", mesh.path);
@@ -186,51 +213,51 @@
         return maskSvg;
     }
 
-    function renderFieldMask(mesh, settings) {
-        displayStatus("Building field mask...");
-        log.time("field mask");
-        var maskSvg = selectNewSvg(view.width, view.height);
-        maskSvg.append("path")
-            .datum(mesh.outerBoundary)
-            .attr("fill", "#fff")
-            .attr("stroke-width", settings.fieldMaskWidth)
-            .attr("stroke", "#fff")
-            .attr("d", mesh.path);
-        log.timeEnd("field mask");
-        return maskSvg;
-    }
+    /**
+     * Returns a function f(x, y) that returns true if the pixel (x, y) of the specified SVG image has some red.
+     */
+    function createMaskFunction(svg) {
+        // How to quickly get an arbitrary pixel's color from an SVG image? The best I can think of is to render the
+        // SVG to a detached Canvas element, then directly access the Canvas' data array.
 
-    function createMasker(svg) {
         log.time("rendering to canvas");
         var canvas = document.createElement("canvas");
         d3.select(canvas).attr("width", svg.attr("width")).attr("height", svg.attr("height"));
-        canvg(canvas, svg.node().parentNode.innerHTML.trim());
+        canvg(canvas, svg.node().parentNode.innerHTML.trim()); // The canvg library renders SVG html text to a canvas.
         var data = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
         var width = canvas.width;
         log.timeEnd("rendering to canvas");
+
         return function(x, y) {
-            var i = (y * width + x) * 4;
+            var i = (y * width + x) * 4;  // [r, g, b, a, r, g, b, a, ...]
             return data[i] > 0;
         }
     }
 
+    /**
+     * Draws the map on screen and returns a promise for the rendered field and display masks.
+     */
     function render(mesh, settings) {
+        // Each step in this process takes a long time, so we must take care to keep the browser responsive. Perform
+        // the steps sequentially and yield control back to the browser after each one.
+
         var mapTask = when(renderMap(mesh))
             .then(nap);
-        var displayMaskTask = mapTask.then(renderDisplayMask.bind(null, mesh))
+        var fieldMaskTask = when(mapTask).then(renderFieldMask.bind(null, mesh, settings))
             .then(nap)
-            .then(createMasker)
+            .then(createMaskFunction)
             .then(nap);
-        var fieldMaskTask = displayMaskTask.then(renderFieldMask.bind(null, mesh, settings))
+        var displayMaskTask = when(fieldMaskTask).then(renderDisplayMask.bind(null, mesh))
             .then(nap)
-            .then(createMasker)
+            .then(createMaskFunction)
             .then(nap);
-        return when.all([displayMaskTask, fieldMaskTask]).then(function(args) {
-            return {displayMask: args[0], fieldMask: args[1]};
+        return when.all([fieldMaskTask, displayMaskTask]).then(function(args) {
+            return {fieldMask: args[0], displayMask: args[1]};
         });
     }
 
     function plotStations(data, mesh) {
+        // Convert station data to GeoJSON format.
         var features = data[0].samples.map(function(e) {
             return {
                 type: "Features",
@@ -402,11 +429,12 @@
     /**
      * Returns a function that performs inverse distance weighting (en.wikipedia.org/wiki/Inverse_distance_weighting)
      * interpolation over the specified stations using k closest neighbors. The stations array must be comprised of
-     * elements with the structure {point: [x, y], sample: [vx, vy]}, where sample represents a vector in rectangular form.
+     * elements with the structure {point: [x, y], sample: [vx, vy]}, where sample represents a vector in rectangular
+     * form.
      *
-     * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as 'result'
-     * to provide the initial value. After invocation, result holds the interpolated vector vxi, vyi in its 0th and 1st
-     * elements, respectively.
+     * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as
+     * 'result' to provide the initial value. After invocation, result holds the interpolated vector vxi, vyi in its
+     * 0th and 1st elements, respectively.
      */
     function idw(stations, k) {
 
@@ -461,10 +489,10 @@
     }
 
     /**
-     * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector
-     * in pixel space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this
-     * method returns [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display
-     * would point _to_ the SE (lower right).
+     * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector in pixel
+     * space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this method returns
+     * [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display would point _to_ the
+     * SE (lower right).
      */
     function polarToRectangular(v) {
         var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
@@ -551,11 +579,10 @@
                 }
 
                 if (yMin <= yMax) {
-                    // Interpolate a vector for each valid y in the column. A column may have a long empty
-                    // region at the front. To save space, eliminate this empty region by encoding an
-                    // offset in the column's 0th element. A column with only three points defined at y=92,
-                    // 93 and 94, would have an offset of 91 and a length of four. The point at y=92 would
-                    // be column[92 - column[0]] === column[1].
+                    // Interpolate a vector for each valid y in the column. A column may have a long empty region at
+                    // the front. To save space, eliminate this empty region by encoding an offset in the column's 0th
+                    // element. A column with only three points defined at y=92, 93 and 94, would have an offset of 91
+                    // and a length of four. The point at y=92 would be column[92 - column[0]] === column[1].
 
                     var column = columns[x] = [];
                     var offset = column[0] = yMin - 1;
@@ -758,4 +785,4 @@
 
 })();
 
-// what the... you read this far? :)
+// what the... you read this far?
