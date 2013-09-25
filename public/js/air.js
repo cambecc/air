@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2013 Cameron Beccario
  * The MIT License - http://opensource.org/licenses/MIT
+ *
  * https://github.com/cambecc/air
  */
 (function () {
@@ -32,9 +33,10 @@
      * @param topo a TopoJSON object holding geographic map data and its bounding box.
      */
     function createSettings(topo) {
+        var isFF = /firefox/i.test(navigator.userAgent);
         var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
         var bounds = createDisplayBounds(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
-        var isFF = /firefox/i.test(navigator.userAgent);
+        var styles = [];
         var settings = {
             projection: projection,
             displayBounds: bounds,
@@ -44,9 +46,16 @@
             fieldMaskWidth: isFF ? 2 : Math.ceil(bounds.height * 0.06),  // Wide strokes on FF are very slow
             fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)",  // FF Mac alpha behaves differently
             frameRate: 40,  // desired milliseconds per frame
-            animate: true
+            animate: true,
+            styles: styles,
+            styleIndex: function(m) {  // map wind speed to a style
+                return Math.floor(Math.min(m, 17) / 17 * (styles.length - 1));
+            }
         };
         log.debug(JSON.stringify(view) + " " + JSON.stringify(settings));
+        for (var j = 85; j <= 255; j += 5) {
+            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+        }
         return settings;
     }
 
@@ -71,7 +80,7 @@
         return {width: x, height: y};
     }();
 
-    function initializeDocument() {
+    function init() {
         // Tweak document to distinguish CSS styling between touch and non-touch environments. Hacky hack.
         if ("ontouchstart" in document.documentElement) {
             document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
@@ -156,6 +165,13 @@
         var d = when.defer();
         setTimeout(function() { d.resolve(value); }, MIN_SLEEP_TIME);
         return d.promise;
+    }
+
+    /**
+     * Returns a random number between min (inclusive) and max (exclusive).
+     */
+    function rand(min, max) {
+        return min + Math.random() * (max - min);
     }
 
     function displayStatus(status) {
@@ -352,7 +368,7 @@
         // Pivot on the median station using the policy that all stations to the left must be _strictly smaller_.
         var median = Math.floor(stations.length / 2);
         var node = stations[median];
-        // Scan backwards for stations aligned on the same axis. We must be at the beginning of any such sequence of dups.
+        // Scan backwards for stations aligned on the same axis. We want the start of any such sequence.
         while (median > 0 && compareByAxis(node, stations[median - 1]) === 0) {
             node = stations[--median];
         }
@@ -540,37 +556,58 @@
                Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
     }
 
-    function buildStations(samples, projection) {
-        var stations = [];
+    /**
+     * Converts station samples to points in pixel space with a rectangular vector. These nodes are then used
+     * to drive interpolation of the vector field.
+     */
+    function buildStationNodes(samples, projection) {
+        var nodes = [];
         samples.forEach(function(sample) {
             if (sample.wind[0] && sample.wind[1]) {
-                stations.push({
+                nodes.push({
                     location: projection(sample.coordinates),
                     sample: polarToRectangular(sample.wind)
                 });
             }
         });
-        return stations;
+        return nodes;
     }
 
     /**
      * Returns a function f(x, y) that defines a vector field. The function returns the vector nearest to the
-     * point (x, y) if the field is defined, otherwise the "nil" vector [NaN, NaN, NIL] is returned.
+     * point (x, y) if the field is defined, otherwise the "nil" vector [NaN, NaN, NIL (-2)] is returned. The method
+     * randomize(o) will set {x:, y:} to a random real point somewhere within the field's bounds.
      */
     function createField(columns) {
         var nilVector = [NaN, NaN, NIL];
-        return function(x, y) {
+        var field = function(x, y) {
             var column = columns[Math.round(x)];
             if (column) {
-                var v = column[Math.round(y) - column[0]];
+                var v = column[Math.round(y) - column[0]];  // the 0th element is the offset--see interpolateColumn
                 if (v) {
                     return v;
                 }
             }
             return nilVector;
         }
+        field.randomize = function(o) {
+            var column;
+            do {
+                column = columns[Math.floor(o.x = rand(0, columns.length))];
+            } while (!column);
+            o.y = rand(1, column.length) + column[0];
+            return o;
+        }
+        return field;
     }
 
+    /**
+     * Returns a promise for a vector field function (see createField). The vector field uses the sampling stations'
+     * data to interpolate a vector at each point (x, y) in the specified field mask. The vectors produced by this
+     * interpolation have the form [dx, dy, m] where dx and dy are the rectangular components of the vector and m is
+     * the magnitude dx^2 + dy^2. If the vector is not visible because it lies outside the display mask, then m
+     * has the value INVISIBLE (-1).
+     */
     function interpolateField(data, settings, masks) {
         log.time("interpolating field");
         var d = when.defer();
@@ -582,7 +619,7 @@
             return d.reject("No Data in Response");
         }
 
-        var stations = buildStations(data[0].samples, settings.projection);
+        var stations = buildStationNodes(data[0].samples, settings.projection);
         var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
         var columns = [];
@@ -590,143 +627,132 @@
         var yBound = bounds.y + bounds.height;  // upper bound (exclusive)
         var x = bounds.x;
 
+        function interpolateColumn(x) {
+            // Find min and max y coordinates in the column where the field mask is defined.
+            var yMin, yMax;
+            for (yMin = 0; yMin < yBound && !fieldMask(x, yMin); yMin++) {
+            }
+            for (yMax = yBound - 1; yMax > yMin && !fieldMask(x, yMax); yMax--) {
+            }
+
+            if (yMin <= yMax) {
+                // Interpolate a vector for each valid y in the column. A column may have a long empty region at
+                // the front. To save space, eliminate this empty region by encoding an offset in the column's 0th
+                // element. A column with only three points defined at y=92, 93 and 94, would have an offset of 91
+                // and a length of four. The point at y=92 would be column[92 - column[0]] === column[1].
+
+                var column = [];
+                var offset = column[0] = yMin - 1;
+                for (var y = yMin; y <= yMax; y++) {
+                    var v = null;
+                    if (fieldMask(x, y)) {
+                        v = [0, 0, 0];
+                        v = interpolate(x, y, v);
+                        v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
+                        v = scaleVector(v, settings.velocityScale);
+                    }
+                    column[y - offset] = v;
+                }
+                return column;
+            }
+            else {
+                return null;
+            }
+        }
+
         function batchInterpolate() {
             var start = +new Date;
             while (x < xBound) {
-                // Find min and max y coordinates in the column where the field mask is defined.
-                var yMin, yMax;
-                for (yMin = 0; yMin < yBound && !fieldMask(x, yMin); yMin++) {
-                }
-                for (yMax = yBound - 1; yMax > yMin && !fieldMask(x, yMax); yMax--) {
-                }
-
-                if (yMin <= yMax) {
-                    // Interpolate a vector for each valid y in the column. A column may have a long empty region at
-                    // the front. To save space, eliminate this empty region by encoding an offset in the column's 0th
-                    // element. A column with only three points defined at y=92, 93 and 94, would have an offset of 91
-                    // and a length of four. The point at y=92 would be column[92 - column[0]] === column[1].
-
-                    var column = columns[x] = [];
-                    var offset = column[0] = yMin - 1;
-                    for (var y = yMin; y <= yMax; y++) {
-                        var v = null;
-                        if (fieldMask(x, y)) {
-                            v = [0, 0, 0];
-                            v = interpolate(x, y, v);
-                            v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
-                        }
-                        column[y - offset] = v;
-                    }
-                }
-                else {
-                    columns[x] = null;
-                }
-                x++;
-
+                columns[x] = interpolateColumn(x);
+                x += 1;
                 if ((+new Date - start) > MAX_TASK_TIME) {
+                    // Interpolation is taking too long. Schedule the next batch for later and yield.
                     displayStatus("Interpolating: " + x + "/" + xBound);
-                    setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+                    nextBatch();
                     return;
                 }
             }
-
             d.resolve(createField(columns));
             displayStatus(data[0].date.replace(":00+09:00", " JST"));
             log.timeEnd("interpolating field");
         }
 
-        batchInterpolate();
+        function nextBatch() {
+            nap().then(batchInterpolate).then(null, function(error) { d.reject(error); });
+        }
+
+        nextBatch();
 
         return d.promise;
     }
 
+    /**
+     * Draw particles with the specified vector field. Frame by frame, each particle ages by one and moves according to
+     * the vector at its current position. When a particle reaches its max age, reincarnate it at a random location.
+     *
+     * Per frame, draw each particle as a line from its current position to its next position. The speed of the
+     * particle chooses the line style--faster particles are drawn with lighter styles. For performance reasons, group
+     * particles of the same style and draw them within one beginPath()-stroke() operation.
+     *
+     * Before each frame, paint a very faint alpha rectangle over the entire canvas to provide a fade effect on the
+     * particles' previously drawn trails.
+     */
     function animate(settings, field) {
-        var particles = [];
         var bounds = settings.displayBounds;
-
-        function randomize(particle) {
-            var x, y, i = 30;
-            do {
-                x = bounds.x + Math.random() * bounds.width;
-                y = bounds.y + Math.random() * bounds.height;
-                if (--i == 0) {  // Ugh. How to efficiently pick a random point within a polygon?
-                    x = bounds.width / 2;
-                    y = bounds.height / 2;
-                    break;
-                }
-            } while (field(x, y)[2] === NIL);
-            particle.x = x;
-            particle.y = y;
-        }
-
+        var buckets = settings.styles.map(function() { return []; });
+        var particles = [];
         for (var i = 0; i < settings.particleCount; i++) {
-            var particle = {age: Math.floor(Math.random() * settings.maxParticleAge)};
-            randomize(particle);
-            particles.push(particle);
+            particles.push(field.randomize({age: rand(0, settings.maxParticleAge)}));
         }
 
-        var styles = [];
-        for (var j = 85; j <= 255; j += 5) {
-            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+        function evolve() {
+            buckets.forEach(function(bucket) { bucket.length = 0; });
+            particles.forEach(function(particle) {
+                if (particle.age > settings.maxParticleAge) {
+                    field.randomize(particle).age = 0;
+                }
+                var x = particle.x;
+                var y = particle.y;
+                var v = field(x, y);  // vector at current position
+                var m = v[2];
+                if (m === NIL) {
+                    particle.age = settings.maxParticleAge;  // particle has escaped the grid, never to return...
+                }
+                else {
+                    var xt = x + v[0];
+                    var yt = y + v[1];
+                    if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
+                        // Path from (x,y) to (xt,yt) is visible, so add this particle to the appropriate draw bucket.
+                        particle.xt = xt;
+                        particle.yt = yt;
+                        buckets[settings.styleIndex(m)].push(particle);
+                    }
+                    else {
+                        // Particle isn't visible, but it still moves through the field.
+                        particle.x = xt;
+                        particle.y = yt;
+                    }
+                }
+                particle.age += 1;
+            });
         }
-        var max = 17;
-        var min = 0;
-        var range = max - min;
 
         var g = d3.select(FIELD_CANVAS_ID).node().getContext("2d");
         g.lineWidth = 0.75;
+        g.fillStyle = settings.fadeFillStyle;
 
-        (function draw() {
-            var start = +new Date;
-
+        function draw() {
+            // Fade existing particle trails.
             var prev = g.globalCompositeOperation;
-            g.fillStyle = settings.fadeFillStyle;
             g.globalCompositeOperation = "destination-in";
             g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
             g.globalCompositeOperation = prev;
 
-            var buckets = [];
-            for (var i = 0; i < styles.length; i++) {
-                buckets[i] = [];
-            }
-
-            particles.forEach(function(particle) {
-                if (particle.age > settings.maxParticleAge) {
-                    randomize(particle);
-                    particle.age = 0;
-                }
-
-                // get vector at current location
-                var x = particle.x;
-                var y = particle.y;
-
-                var v = field(x, y);
-                if (v[2] === NIL) {  // particle has gone off the field, never to return...
-                    particle.age = settings.maxParticleAge + 1;
-                    return;
-                }
-
-                var xt = x + v[0] * settings.velocityScale;
-                var yt = y + v[1] * settings.velocityScale;
-                var m = v[2];
-
-                if (m > INVISIBLE && field(xt, yt)[2] > INVISIBLE) {
-                    var i = Math.floor((Math.min(m, max) - min) / range * (styles.length - 1));
-                    particle.xt = xt;
-                    particle.yt = yt;
-                    buckets[i].push(particle);
-                }
-                else {
-                    particle.x = xt;
-                    particle.y = yt;
-                }
-                particle.age += 1;
-            });
-
+            // Draw new particle trails.
             buckets.forEach(function(bucket, i) {
                 if (bucket.length > 0) {
                     g.beginPath();
-                    g.strokeStyle = styles[i];
+                    g.strokeStyle = settings.styles[i];
                     bucket.forEach(function(particle) {
                         g.moveTo(particle.x, particle.y);
                         g.lineTo(particle.xt, particle.yt);
@@ -736,11 +762,20 @@
                     g.stroke();
                 }
             });
+        }
 
-            if (settings.animate) {
-                var d = (+new Date - start);
-                var next = Math.max(settings.frameRate, settings.frameRate - d);
-                setTimeout(draw, next);  // UNDONE: we lose the error handler callstack protection here
+        (function frame() {
+            try {
+                if (settings.animate) {
+                    // var start = +new Date;
+                    evolve();
+                    draw();
+                    // var duration = (+new Date - start);
+                    setTimeout(frame, settings.frameRate /* - duration*/);
+                }
+            }
+            catch (e) {
+                report(e);
             }
         })();
     }
@@ -773,7 +808,7 @@
 
     var topoTask            = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
     var dataTask            = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
-    var initializeTask      = when.all([true                                ]).then(apply(initializeDocument));
+    var initTask            = when.all([true                                ]).then(apply(init));
     var settingsTask        = when.all([topoTask                            ]).then(apply(createSettings));
     var meshTask            = when.all([topoTask, settingsTask              ]).then(apply(buildMeshes));
     var renderTask          = when.all([settingsTask, meshTask              ]).then(apply(render));
@@ -786,7 +821,7 @@
     when.all([
         topoTask,
         dataTask,
-        initializeTask,
+        initTask,
         settingsTask,
         meshTask,
         renderTask,
