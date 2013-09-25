@@ -12,7 +12,7 @@
     var MAX_TASK_TIME = 100;  // amount of time before a task yields control (milliseconds)
     var MIN_SLEEP_TIME = 25;  // amount of time a task waits before resuming (milliseconds)
     var INVISIBLE = -1;  // an invisible vector
-    var NONE = -2;       // non-existent vector
+    var NIL = -2;       // non-existent vector
 
     // special document elements
     var MAP_SVG_ID = "#map-svg";
@@ -42,7 +42,7 @@
             maxParticleAge: 40,  // max number of frames a particle is drawn before regeneration
             velocityScale: +(bounds.height / 700).toFixed(3),  // particle speed as number of pixels per unit vector
             fieldMaskWidth: isFF ? 2 : Math.ceil(bounds.height * 0.06),  // Wide strokes on FF are very slow
-            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)": "rgba(0, 0, 0, 0.97)",  // FF alpha behaves differently
+            fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)",  // FF Mac alpha behaves differently
             frameRate: 40,  // desired milliseconds per frame
             animate: true
         };
@@ -70,6 +70,20 @@
         var y = w.innerHeight || d.clientHeight || b.clientHeight;
         return {width: x, height: y};
     }();
+
+    function initializeDocument() {
+        // Tweak document to distinguish CSS styling between touch and non-touch environments. Hacky hack.
+        if ("ontouchstart" in document.documentElement) {
+            document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
+        }
+        else {
+            document.documentElement.className += " no-touch";  // to filter styles problematic for touch
+        }
+
+        // Modify the map and field elements to fill the screen.
+        d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
+        d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
+    }
 
     /**
      * Returns a d3 Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
@@ -126,7 +140,8 @@
     }
 
     /**
-     * Returns a function that takes an array and applies it as arguments to the specified function. Yup.
+     * Returns a function that takes an array and applies it as arguments to the specified function. Yup. Basically
+     * the same as when.js/apply.
      */
     function apply(f) {
         return function(args) {
@@ -237,7 +252,7 @@
     /**
      * Draws the map on screen and returns a promise for the rendered field and display masks.
      */
-    function render(mesh, settings) {
+    function render(settings, mesh) {
         // Each step in this process takes a long time, so we must take care to keep the browser responsive. Perform
         // the steps sequentially and yield control back to the browser after each one.
 
@@ -256,6 +271,9 @@
         });
     }
 
+    /**
+     * Draws the locations of the sampling stations as small points on the map. For fun.
+     */
     function plotStations(data, mesh) {
         // Convert station data to GeoJSON format.
         var features = data[0].samples.map(function(e) {
@@ -535,8 +553,12 @@
         return stations;
     }
 
+    /**
+     * Returns a function f(x, y) that defines a vector field. The function returns the vector nearest to the
+     * point (x, y) if the field is defined, otherwise the "nil" vector [NaN, NaN, NIL] is returned.
+     */
     function createField(columns) {
-        var noVector = [NaN, NaN, NONE];
+        var nilVector = [NaN, NaN, NIL];
         return function(x, y) {
             var column = columns[Math.round(x)];
             if (column) {
@@ -545,7 +567,7 @@
                     return v;
                 }
             }
-            return noVector;
+            return nilVector;
         }
     }
 
@@ -609,7 +631,7 @@
             }
 
             d.resolve(createField(columns));
-            displayStatus(data[0].date);
+            displayStatus(data[0].date.replace(":00+09:00", " JST"));
             log.timeEnd("interpolating field");
         }
 
@@ -618,7 +640,7 @@
         return d.promise;
     }
 
-    function process(settings, field) {
+    function animate(settings, field) {
         var particles = [];
         var bounds = settings.displayBounds;
 
@@ -632,7 +654,7 @@
                     y = bounds.height / 2;
                     break;
                 }
-            } while (field(x, y)[2] === NONE);
+            } while (field(x, y)[2] === NIL);
             particle.x = x;
             particle.y = y;
         }
@@ -679,7 +701,7 @@
                 var y = particle.y;
 
                 var v = field(x, y);
-                if (v[2] === NONE) {  // particle has gone off the field, never to return...
+                if (v[2] === NIL) {  // particle has gone off the field, never to return...
                     particle.age = settings.maxParticleAge + 1;
                     return;
                 }
@@ -718,9 +740,27 @@
             if (settings.animate) {
                 var d = (+new Date - start);
                 var next = Math.max(settings.frameRate, settings.frameRate - d);
-                setTimeout(draw, next);
+                setTimeout(draw, next);  // UNDONE: we lose the error handler callstack protection here
             }
         })();
+    }
+
+    function postInit(settings, field) {
+        d3.select(SHOW_LOCATION_ID).on("click", function() {
+            plotCurrentPosition(settings.projection);
+        });
+        d3.select(STOP_ANIMATION).on("click", function() {
+            settings.animate = false;
+        });
+        d3.select(DISPLAY_ID).on("click", function() {
+            var p = d3.mouse(this);
+            var c = settings.projection.invert(p);
+            var v = field(p[0], p[1]);
+            if (v[2] >= INVISIBLE) {
+                d3.select(LOCATION_ID).node().textContent = "⁂ " + formatCoordinates(c[0], c[1]);
+                d3.select(WIND_ID).node().textContent = "⁂ " + formatVector(v[0], v[1]);
+            }
+        });
     }
 
     function report(e) {
@@ -728,17 +768,21 @@
         displayStatus(e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
     }
 
-    var topoTask = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
-    var dataTask = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
-    var initializeTask = when(true).then(initializeDocument);
-    var settingsTask = when(topoTask).then(createSettings);
-    var meshTask = when.all([topoTask, settingsTask]).then(apply(buildMeshes));
-    var renderTask = when.all([meshTask, settingsTask]).then(apply(render));
-    var plotStationsTask = when.all([dataTask, meshTask]).then(apply(plotStations));
-    var interpolateTask = when.all([dataTask, settingsTask, renderTask]).then(apply(interpolateField));
-    var processTask = when.all([settingsTask, interpolateTask]).then(apply(process));
+    // Let's try an experiment! Define a dependency graph of tasks and use promises to let the control flow occur
+    // organically. Any errors will cause dependent tasks to be skipped.
 
-    // Register a catch-all error handler.
+    var topoTask            = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
+    var dataTask            = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
+    var initializeTask      = when.all([true                                ]).then(apply(initializeDocument));
+    var settingsTask        = when.all([topoTask                            ]).then(apply(createSettings));
+    var meshTask            = when.all([topoTask, settingsTask              ]).then(apply(buildMeshes));
+    var renderTask          = when.all([settingsTask, meshTask              ]).then(apply(render));
+    var plotStationsTask    = when.all([dataTask, meshTask                  ]).then(apply(plotStations));
+    var interpolateTask     = when.all([dataTask, settingsTask, renderTask  ]).then(apply(interpolateField));
+    var postInitTask        = when.all([settingsTask, interpolateTask       ]).then(apply(postInit));
+    var animateTask         = when.all([settingsTask, interpolateTask       ]).then(apply(animate));
+
+    // Register a catch-all error handler to log errors rather then let them slip away into the ether.... Cleaner way?
     when.all([
         topoTask,
         dataTask,
@@ -748,40 +792,9 @@
         renderTask,
         plotStationsTask,
         interpolateTask,
-        processTask]).then(null, report);
-
-    function initializeDocument() {
-        // Tweak document to distinguish CSS styling between touch and non-touch environments.
-        if ("ontouchstart" in document.documentElement) {
-            document.addEventListener("touchstart", function() {}, false);  // this hack enables :active pseudoclass
-        }
-        else {
-            document.documentElement.className += " no-touch";  // to filter styles problematic for touch
-        }
-
-        // Set the size of the map and field elements.
-        d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
-        d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
-
-        // Register event handlers.
-        when.all([settingsTask, interpolateTask]).then(apply(function(settings, field) {
-            d3.select(SHOW_LOCATION_ID).on("click", function() {
-                plotCurrentPosition(settings.projection);
-            });
-            d3.select(STOP_ANIMATION).on("click", function() {
-                settings.animate = false;
-            });
-            d3.select(DISPLAY_ID).on("click", function() {
-                var p = d3.mouse(this);
-                var c = settings.projection.invert(p);
-                var v = field(p[0], p[1]);
-                if (v[2] >= INVISIBLE) {
-                    d3.select(LOCATION_ID).node().textContent = "⁂ " + formatCoordinates(c[0], c[1]);
-                    d3.select(WIND_ID).node().textContent = "⁂ " + formatVector(v[0], v[1]);
-                }
-            });
-        })).then(null, report);
-    }
+        postInitTask,
+        animateTask
+    ]).then(null, report);
 
 })();
 
