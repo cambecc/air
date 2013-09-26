@@ -97,14 +97,19 @@
         d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
         d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
 
+        // Add event handlers for the navigation buttons.
         function navToHours(offset) {
-            var date = new Date(d3.select(DISPLAY_ID).attr("data-date"));
+            var parts = d3.select(DISPLAY_ID).attr("data-date").split(/[- :]/);
+            var date = new Date(parts[0], parts[1] - 1, parts[2], parts[3]);
             if (isFinite(+date)) {
                 date.setHours(date.getHours() + offset);
-                window.location.href = "/map/wind/" + date.getFullYear() + "/" + (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getHours();
+                window.location.href = "/map/wind/" +
+                    date.getFullYear() + "/" +
+                    (date.getMonth() + 1) + "/" +
+                    date.getDate() + "/" +
+                    date.getHours();
             }
         }
-
         d3.select(PREVIOUS_DAY_ID).on("click", navToHours.bind(null, -24));
         d3.select(PREVIOUS_HOUR_ID).on("click", navToHours.bind(null, -1));
         d3.select(NEXT_HOUR_ID).on("click", navToHours.bind(null, +1));
