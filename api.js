@@ -255,7 +255,7 @@ function buildResponse(rows) {
         if (!bucket) {
             buckets[date] = bucket = [];
         }
-        if (!row.wd || !row.wv) {
+        if (!_.isFinite(row.wd) || !_.isFinite(row.wv)) {
             return;
         }
         bucket.push({

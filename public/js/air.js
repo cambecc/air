@@ -316,16 +316,23 @@
         });
     }
 
+    function isValidSample(wind) {
+        return wind[0] == +wind[0] && wind[1] == +wind[1];
+    }
+
     /**
      * Draws the locations of the sampling stations as small points on the map. For fun.
      */
     function plotStations(data, mesh) {
         // Convert station data to GeoJSON format.
-        var features = data[0].samples.map(function(e) {
-            return {
-                type: "Features",
-                properties: {name: e.stationId.toString()},
-                geometry: {type: "Point", coordinates: e.coordinates}};
+        var features = [];
+        data[0].samples.forEach(function(e) {
+            if (isValidSample(e.wind)) {
+                features.push({
+                    type: "Features",
+                    properties: {name: e.stationId.toString()},
+                    geometry: {type: "Point", coordinates: e.coordinates}});
+            }
         });
         mesh.path.pointRadius(1);
         d3.select(MAP_SVG_ID).append("path")
@@ -592,7 +599,7 @@
     function buildStationNodes(samples, projection) {
         var nodes = [];
         samples.forEach(function(sample) {
-            if (sample.wind[0] && sample.wind[1]) {
+            if (isValidSample(sample.wind)) {
                 nodes.push({
                     location: projection(sample.coordinates),
                     sample: polarToRectangular(sample.wind)
