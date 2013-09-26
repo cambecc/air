@@ -351,6 +351,7 @@ app.get("/map/wind/current", function(req, res) {
 });
 
 var windRegex = /\/data\/wind\/current/;  // for replacing value of '/data/wind/current' in index.html
+var dateRegex = /data-date="/;  // for inserting the date of the samples when specified
 
 app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
     try {
@@ -358,8 +359,12 @@ app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
         if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
+        var date = tool.toISOString({year: parts[0], month: parts[1], day: parts[2], hour: parts[3]});
+        var text = indexHTMLText.replace(windRegex, "/data/wind/" + parts.join("/"));
+        text = text.replace(dateRegex, 'data-date="' + date.substr(0, date.length - 1));  // strip off 'Z'
+
         prepareCacheHeaders(res, indexHTMLDate);
-        res.send(indexHTMLText.replace(windRegex, "/data/wind/" + parts.join("/")));
+        res.send(text);
     }
     catch (error) {
         handleUnexpected(res, error);

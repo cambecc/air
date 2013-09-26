@@ -252,10 +252,10 @@ function pollForUpdates() {
         return Math.min(Math.pow(2, t < 0 ? -(t + 1) : t), 15) * ONE_MINUTE;
     }
 
-    // The air data is updated every hour, but we don't know exactly when. By specifying initialRetry = -2,
+    // The air data is updated every hour, but we don't know exactly when. By specifying initialRetry = -1,
     // the pages get scraped a little earlier than the estimated time. Eventually, the algorithm will center
     // itself on the actual time, even if it varies a bit.
-    tool.setFlexInterval(pollP160ForUpdates, ONE_MINUTE, ONE_HOUR, exponentialBackoff, -2);
+    tool.setFlexInterval(pollP160ForUpdates, ONE_MINUTE, ONE_HOUR, exponentialBackoff, -1);
 }
 
 start()

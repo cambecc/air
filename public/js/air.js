@@ -1,5 +1,5 @@
 /**
- * air.js - a project to visualize air quality data for Tokyo.
+ * air - a project to visualize air quality data for Tokyo.
  *
  * Copyright (c) 2013 Cameron Beccario
  * The MIT License - http://opensource.org/licenses/MIT
@@ -22,9 +22,13 @@
     var LOCATION_ID = "#location";
     var STATUS_ID = "#status";
     var WIND_ID = "#wind";
+    var PREVIOUS_DAY_ID = "#previous-day";
+    var PREVIOUS_HOUR_ID = "#previous-hour";
+    var NEXT_HOUR_ID = "#next-hour";
+    var NEXT_DAY_ID = "#next-day";
     var SHOW_LOCATION_ID = "#show-location";
-    var POSITION_ID = "#position";
     var STOP_ANIMATION = "#stop-animation";
+    var POSITION_ID = "#position";
 
     /**
      * Returns an object holding parameters for the animation engine, scaled for view size and type of browser.
@@ -92,6 +96,19 @@
         // Modify the map and field elements to fill the screen.
         d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
         d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
+
+        function navToHours(offset) {
+            var date = new Date(d3.select(DISPLAY_ID).attr("data-date"));
+            if (isFinite(+date)) {
+                date.setHours(date.getHours() + offset);
+                window.location.href = "/map/wind/" + date.getFullYear() + "/" + (date.getMonth() + 1) + "/" + date.getDate() + "/" + date.getHours();
+            }
+        }
+
+        d3.select(PREVIOUS_DAY_ID).on("click", navToHours.bind(null, -24));
+        d3.select(PREVIOUS_HOUR_ID).on("click", navToHours.bind(null, -1));
+        d3.select(NEXT_HOUR_ID).on("click", navToHours.bind(null, +1));
+        d3.select(NEXT_DAY_ID).on("click", navToHours.bind(null, +24));
     }
 
     /**
@@ -680,7 +697,9 @@
                         return;
                     }
                 }
-                displayStatus(data[0].date.replace(":00+09:00", " JST"));
+                var date = data[0].date.replace(":00+09:00", "");
+                d3.select(DISPLAY_ID).attr("data-date", date);
+                displayStatus(date + " JST");
                 d.resolve(createField(columns));
                 log.timeEnd("interpolating field");
             }

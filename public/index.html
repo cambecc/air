@@ -12,7 +12,7 @@
 </head>
 <body>
 
-    <div id="display" data-topography="/data/tokyo-topo.json" data-samples="/data/wind/current">
+    <div id="display" data-topography="/data/tokyo-topo.json" data-samples="/data/wind/current" data-date="">
         <div id="map">
             <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
         </div>
@@ -30,10 +30,25 @@
 
     <div id="about">
         <h1>About</h1>
+        <span>Control | </span>
+            <span class="text-button" id="previous-day">«前日</span><span> – </span>
+            <span class="text-button" id="previous-hour">1時間前</span><span> – </span>
+            <span class="text-button" id="next-hour">1時間後</span><span> – </span>
+            <span class="text-button" id="next-day">翌日»</span><span> – </span>
+            <span class="text-button" id="show-location">現在地</span><span> – </span>
+            <span class="text-button" id="stop-animation">Stop Animation</span>
+        <p>Gallery |
+            <a href="/map/wind/current">最新</a>,
+            <a href="/map/wind/2013/09/22/01">無風</a>,
+            <a href="/map/wind/2013/08/21/15">そよ風</a>,
+            <a href="/map/wind/2013/09/01/16">雷雨</a>,
+            <a href="/map/wind/2013/09/16/11">台風18号</a>,
+            <a href="/map/wind/2013/09/16/20">台風18号後</a></p>
         <p>Air Data | <a href="http://www.kankyo.metro.tokyo.jp">東京都環境局環境改善部大気保全課</a></p>
         <p>Map Data |
             <a href="http://nlftp.mlit.go.jp/ksj/index.html">国土数値情報（行政区域データ）国土交通省</a></p>
         <p>Font | <a href="http://mplus-fonts.sourceforge.jp">M+ FONTS</a></p>
+        <p>Author | Cameron Beccario <a href="https://twitter.com/cambecc">@cambecc</a></p>
         <p>Source | <a href="https://github.com/cambecc/air">cambecc/air on GitHub</a></p>
         <p>Modules |
             <a href="http://nodejs.org/">node.js</a>,
@@ -42,18 +57,7 @@
             <a href="https://github.com/cujojs/when">when.js</a>,
             <a href="https://github.com/brianc/node-postgres">node-postgres</a></p>
         <p>Inspiration | <a href="http://hint.fm/wind/">HINT.FM wind map</a></p>
-        <p>Author | Cameron Beccario <a href="https://twitter.com/cambecc">@cambecc</a></p>
-        <span>Control | </span>
-            <span class="text-button" id="show-location">Show Location</span><span> – </span>
-            <span class="text-button" id="stop-animation">Stop Animation</span>
-        <p>Gallery |
-            <a href="/map/wind/2013/09/22/01">無風</a>,
-            <a href="/map/wind/2013/08/21/15">そよ風</a>,
-            <a href="/map/wind/2013/09/01/16">雷雨</a>,
-            <a href="/map/wind/2013/09/16/11">台風18号</a>,
-            <a href="/map/wind/2013/09/16/20">台風18号後</a></p>
         <p>Disclaimer | For entertainment only. NOT FOR NAVIGATION</p>
-        <p>&nbsp;</p>
     </div>
 
     <script src="/js/when.js" charset="utf-8"></script>
