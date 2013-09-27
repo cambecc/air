@@ -17,6 +17,8 @@ var indexHTMLText = fs.readFileSync(indexHTML, {encoding: "utf-8"});
 var indexHTMLDate = fs.statSync(indexHTML).mtime;
 
 var app = express();
+
+app.use(cacheControl());
 app.use(express.compress({filter: compressionFilter}));
 
 express.logger.token("date", function() {
@@ -217,14 +219,6 @@ function parseDateParts(year, month, day, hour) {
 }
 
 /**
- * Adds headers to a response to enable caching and specify the last modified date and max-age (default 0).
- */
-function prepareCacheHeaders(res, lastModified, maxAge) {
-    res.set("Cache-Control", "public, max-age=" + (maxAge || 0));
-    res.set("Last-Modified", lastModified.toUTCString());
-}
-
-/**
  * Casts v to a Number if it is truthy, otherwise null.
  */
 function asNullOrNumber(v) {
@@ -310,7 +304,7 @@ function query(res, constraints) {
         if (data.notFound) {
             return res.send(404);
         }
-        prepareCacheHeaders(res, data.lastModified);
+        prepareLastModified(res, data.lastModified);
         res.set("Content-Type", "application/json");
         res.send(data.jsonPayload);
     }
@@ -342,7 +336,7 @@ app.get("/data/wind/:year/:month/:day/:hour", function(req, res) {
 
 app.get("/map/wind/current", function(req, res) {
     try {
-        prepareCacheHeaders(res, indexHTMLDate);
+        prepareLastModified(res, indexHTMLDate);
         res.send(indexHTMLText);
     }
     catch (error) {
@@ -363,7 +357,7 @@ app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
         var text = indexHTMLText.replace(windRegex, "/data/wind/" + parts.join("/"));
         text = text.replace(dateRegex, 'data-date="' + date.substr(0, date.length - 1));  // strip off 'Z'
 
-        prepareCacheHeaders(res, indexHTMLDate);
+        prepareLastModified(res, indexHTMLDate);
         res.send(text);
     }
     catch (error) {
@@ -376,6 +370,61 @@ app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
 express.static.mime.define({"font/ttf": ["ttf"]});
 
 app.use(express.static(__dirname + "/public"));
+
+/**
+ * Adds headers to a response to specify the last modified date.
+ */
+function prepareLastModified(res, lastModified) {
+    res.set("Last-Modified", lastModified.toUTCString());
+}
+
+/**
+ * Adds headers to a response to enable caching. maxAge is number of seconds to cache the response.
+ */
+function prepareCacheControl(res, maxAge) {
+    res.setHeader("Cache-Control", "public, max-age=" + maxAge);
+    if (maxAge) {
+        var now = (Math.ceil(Date.now() / 1000) + 1) * 1000;
+        res.setHeader("Expires", new Date(now + maxAge * 1000).toUTCString());
+    }
+}
+
+function cacheControl() {
+    var SECOND = 1;
+    var MINUTE = 60 * SECOND;
+    var HOUR = 60 * MINUTE;
+    var DAY = 24 * HOUR;
+    var DEFAULT = 30 * MINUTE;
+
+    var rules = [
+        // very-short-lived
+        [/data\/wind\/current/, 1 * MINUTE],
+
+        // short-lived (default behavior for all other resources)
+        [/js\/air\.js/, DEFAULT],  // override medium-lived .js rule below
+
+        // medium-lived
+        [/js\/.*\.js/, 5 * DAY],
+        [/tokyo-topo\.json/, 5 * DAY],
+
+        // long-lived
+        [/mplus-.*\.ttf/, 30 * DAY],
+        [/\.png|\.ico/, 30 * DAY]
+    ];
+
+    return function(req, res, next) {
+        var maxAge = DEFAULT;
+        for (var i = 0; i < rules.length; i++) {
+            var rule = rules[i];
+            if (rule[0].test(req.url)) {
+                maxAge = rule[1];
+                break;
+            }
+        }
+        prepareCacheControl(res, maxAge);
+        return next();
+    };
+}
 
 app.listen(port);
 log.info(tool.format("Listening on port {0}...", port));
