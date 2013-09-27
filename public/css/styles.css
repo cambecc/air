@@ -37,6 +37,11 @@ body {
     fill: #4986bc;
 }
 
+#warn {
+    margin-top: 25%;
+    margin-left: 2%;
+}
+
 #position {
     fill: none;
     stroke: #3aff3a;
