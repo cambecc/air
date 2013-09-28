@@ -23,5 +23,6 @@ THE SOFTWARE.
 ---
 
 国土数値情報（行政区域データ）国土交通省. Portions of this project use National-
-Land Numerical Information, Administrative District Data, from MLIT Japan.
-For license details, see http://nlftp.mlit.go.jp/ksj/other/yakkan.html.
+Land Numerical Information, Administrative District Data, from the Ministry
+of Land, Infrastructure, Transport and Tourism, Japan. For license details,
+see http://nlftp.mlit.go.jp/ksj/other/yakkan.html.

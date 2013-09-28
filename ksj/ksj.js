@@ -1,3 +1,14 @@
+/**
+ * This file comprises logic to transform and simplify the raw KSJ xml file downloaded from National Land Numerical
+ * Information download service: http://nlftp.mlit.go.jp/ksj-e/index.html.
+ *
+ * Much of the following logic is coded specifically for the structure of the KSJ file for Tokyo's administrative
+ * districts. It is also dependent on the module "xml2js", which transforms XML data to JSON format, so the logic
+ * below expects the structures created by xml2js (such as the special $ object that holds xml node attributes).
+ *
+ * The output is a GeoJSON compatible file of Tokyo's administrative districts.
+ */
+
 "use strict";
 
 var _ = require("underscore");
@@ -50,7 +61,7 @@ function removePrefix(str) {
 }
 
 function pass1(root) {
-    // removes namespaces
+    // removes xml namespaces
     // removes prefixes
     // calculates child counts to aid in collapsing arrays during pass 2
 
@@ -301,6 +312,8 @@ function extractNames(root, surfaces) {
 }
 
 function isInBounds(point) {
+    // Strip out all points not within the primary bounds of Tokyo. This is an optimization to remove the large
+    // number of polygons representing Tokyo's long chain of small islands.
     var longitude = point[0];
     var latitude = point[1];
     return 138.90 < longitude && longitude < 139.95 &&

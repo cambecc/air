@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 
+// Before starting, the topojson library/command is required:
+//     npm install -g topojson
+
 // ./ksj -c ../../scratch/N03-110331_13.xml ../../scratch/tokyo-raw.json
 // ./ksj -t ../../scratch/tokyo-raw.json ../../scratch/main.json
 // topojson --bbox -o ../../scratch/tokyo-topo.json ../../scratch/main.json

@@ -26,8 +26,9 @@
     var PREVIOUS_HOUR_ID = "#previous-hour";
     var NEXT_HOUR_ID = "#next-hour";
     var NEXT_DAY_ID = "#next-day";
+    var CURRENT_CONDITIONS_ID = "#current-conditions";
     var SHOW_LOCATION_ID = "#show-location";
-    var STOP_ANIMATION = "#stop-animation";
+    // var STOP_ANIMATION_ID = "#stop-animation";
     var POSITION_ID = "#position";
 
     /**
@@ -114,6 +115,7 @@
         d3.select(PREVIOUS_HOUR_ID).on("click", navToHours.bind(null, -1));
         d3.select(NEXT_HOUR_ID).on("click", navToHours.bind(null, +1));
         d3.select(NEXT_DAY_ID).on("click", navToHours.bind(null, +24));
+        d3.select(CURRENT_CONDITIONS_ID).on("click", function() { window.location.href = "/map/wind/current"; });
     }
 
     /**
@@ -821,9 +823,9 @@
         d3.select(SHOW_LOCATION_ID).on("click", function() {
             plotCurrentPosition(settings.projection);
         });
-        d3.select(STOP_ANIMATION).on("click", function() {
-            settings.animate = false;
-        });
+        // d3.select(STOP_ANIMATION_ID).on("click", function() {
+        //     settings.animate = false;
+        // });
         d3.select(DISPLAY_ID).on("click", function() {
             var p = d3.mouse(this);
             var c = settings.projection.invert(p);
