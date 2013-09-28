@@ -85,4 +85,4 @@ inspiration
 
 The awesome [wind map at hint.fm](http://hint.fm/wind/) provided the main inspiration for
 this project. And the very nice D3 tutorial [Let's Make a Map](http://bost.ocks.org/mike/map/)
-showed how easy it was to actually get started.
+showed how easy it was to get started.
