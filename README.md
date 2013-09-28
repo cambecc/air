@@ -3,7 +3,7 @@ air
 
 "air" is a project to visualize air quality data provided by the Tokyo Metropolitan
 Government. The main components of the project are:
-   * a scraper to extract air data from [www.kankyo.metro.tokyo.jp](www.kankyo.metro.tokyo.jp)
+   * a scraper to extract air data from [www.kankyo.metro.tokyo.jp](http://www.kankyo.metro.tokyo.jp)
    * a postgres database to store the data
    * an express.js server to serve this data and other static files to the client
    * a client app that interpolates the data and renders an animated wind map
@@ -20,7 +20,7 @@ welcome!
 building and launching
 ----------------------
 
-1. Clone the project and install libraries from npm:
+Clone the project and install libraries from npm:
 
     npm install
 
@@ -28,7 +28,7 @@ NOTE: you will need [libpq](http://www.postgresql.org/docs/9.3/static/libpq.html
 build [pg](https://github.com/brianc/node-postgres). The libpq library was installed
 automatically by postgres on Mac OS X but required separate installation on AWS.
 
-2. Install postgres and create a database, something like:
+Install postgres and create a database, something like:
 
     CREATE DATABASE air
       WITH OWNER = postgres
@@ -38,7 +38,7 @@ automatically by postgres on Mac OS X but required separate installation on AWS.
            LC_CTYPE = 'en_US.UTF-8'
            CONNECTION LIMIT = -1;
 
-3. Launch the server:
+Launch the server:
 
     node server.js <port> <postgres-connection-string> <air-data-url>
 
@@ -46,7 +46,7 @@ Example:
 
     node server.js 8080 postgres://postgres:12345@localhost:5432/air <air-data-url>
 
-4. Finally, point the browser at the server:
+Finally, point the browser at the server:
 
     http://localhost:8080
 
@@ -72,12 +72,12 @@ Building this project required solutions to some interesting problems. Here are 
      http://en.wikipedia.org/wiki/K-d_tree), which greatly improves the performance.
    * The SVG map of Tokyo is overlaid with an HTML5 Canvas, where the animation is drawn.
      The animation renderer needs to know where the borders of Tokyo are rendered
-     on screen by the SVG engine, but this information is extremely difficult to obtain.
+     by the SVG engine, but this information is extremely difficult to obtain.
      To workaround this problem, the [canvg](http://code.google.com/p/canvg/) library
      is used to re-render Tokyo's polygons to a detached Canvas element, and the Canvas'
      pixels operate as a mask to distinguish points that lie inside the map to those
      outside.
-   * I used [when.js](https://github.com/cujojs/when) on the browser because it was a fun
+   * I used [when.js](https://github.com/cujojs/when) in the browser because it was a fun
      experiment.
 
 inspiration
