@@ -1,7 +1,7 @@
 air
 ===
 
-"air" is a project to visualize air quality data provided by the Tokyo Metropolitan
+"air" is a project to visualize live air quality data provided by the Tokyo Metropolitan
 Government. The main components of the project are:
    * a scraper to extract air data from [www.kankyo.metro.tokyo.jp](http://www.kankyo.metro.tokyo.jp)
    * a postgres database to store the data
