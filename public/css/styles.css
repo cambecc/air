@@ -64,6 +64,14 @@ body {
     left: 2%;
 }
 
+#arrow {
+    position: absolute;
+    bottom: 1%;
+    left: 2%;
+    color: #888;
+    font-size: 1.0em;
+}
+
 #about {
     margin-top: 1.25em;
     padding-bottom: 1em;
