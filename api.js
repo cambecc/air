@@ -29,7 +29,8 @@ express.logger.token("response-all", function(req, res) {
 });
 app.use(express.logger(
     ':date - info: :remote-addr :req[cf-connecting-ip] :req[cf-ipcountry] :method :url HTTP/:http-version ' +
-    '":user-agent" :referrer :req[cf-ray]\\n:response-all\\n'));
+    '":user-agent" :referrer :req[cf-ray]'));
+//  '":user-agent" :referrer :req[cf-ray]\\n:response-all\\n'));
 
 //app.get("/about/stations", function(request, response) {
 //    var result = {};
