@@ -179,7 +179,7 @@ function pollP160ForUpdates() {
     var promises = [doP160Page(1), doP160Page(2)];
 
     function sumRowCounts(current, value) {
-        var result = value && value[0] || {};
+        var result = value && value[0] || {rowCount: 0};
         return current + result.rowCount;  // abstraction leakage -- relying on rowCount to exist
     }
 

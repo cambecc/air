@@ -612,6 +612,26 @@
     }
 
     /**
+     * Returns the index of v in array a (adapted from Java and darkskyapp/binary-search).
+     */
+    function binarySearch(a, v) {
+        var low = 0, high = a.length - 1;
+        while (low <= high) {
+            var mid = low + ((high - low) >> 1), p = a[mid];
+            if (p < v) {
+                low = mid + 1;
+            }
+            else if (p === v) {
+                return mid;
+            }
+            else {
+                high = mid - 1;
+            }
+        }
+        return -(low + 1);
+    }
+
+    /**
      * Returns a function f(x, y) that defines a vector field. The function returns the vector nearest to the
      * point (x, y) if the field is defined, otherwise the "nil" vector [NaN, NaN, NIL (-2)] is returned. The method
      * randomize(o) will set {x:, y:} to a random real point somewhere within the field's bounds.
@@ -628,14 +648,37 @@
             }
             return nilVector;
         }
-        field.randomize = function(o) {
-            var column;
-            do {
-                column = columns[Math.floor(o.x = rand(0, columns.length))];
-            } while (!column);
-            o.y = rand(1, column.length) + column[0];
-            return o;
-        }
+
+        // Create a function that will set a particle to a random location in the field. To do this uniformly and
+        // efficiently given the field's sparse data structure, we build a running sum of column widths, starting at 0:
+        //     [0, 10, 25, 29, ..., 100]
+        // Each value represents the index of the first point in that column, and the last element is the total
+        // number of points. Choosing a random point means generating a random number between [0, total), then
+        // finding the column that contains this point by doing a binary search on the array. For example, point #27
+        // corresponds to w[2] and therefore columns[2]. If columns[2] has the form [1041, a, b, c, d], then point
+        // #27's coordinates are {x: 2, y: 1043}, where 1043 == 27 - 25 + 1 + 1041, and the value at that point is 'c'.
+
+        field.randomize = function() {
+            var w = [0];
+            for (var i = 1; i <= columns.length; i++) {
+                var column = columns[i - 1];
+                w[i] = w[i - 1] + (column ? column.length - 1 : 0);
+            }
+            var pointCount = w[w.length - 1];
+
+            return function(o) {
+                var p = Math.floor(rand(0, pointCount));  // choose random point index
+                var x = binarySearch(w, p);  // find column that contains this point
+                x = x < 0 ? -x - 2 : x;  // when negative, x refers to _following_ column, so flip and go back one
+                while (!columns[o.x = x]) {  // skip columns that have no points
+                    x++;
+                }
+                // use remainder of point index to index into column, then add the column's offset to get actual y
+                o.y = p - w[x] + 1 + columns[x][0];
+                return o;
+            }
+        }();
+
         return field;
     }
 
