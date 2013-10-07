@@ -303,6 +303,7 @@ function query(res, constraints) {
 
     function sendResponse(data) {
         if (data.notFound) {
+            prepareCacheControl(res, 30);
             return res.send(404);
         }
         prepareLastModified(res, data.lastModified);
