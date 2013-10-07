@@ -101,7 +101,10 @@
         // Add event handlers for the navigation buttons.
         function navToHours(offset) {
             var parts = d3.select(DISPLAY_ID).attr("data-date").split(/[- :]/);
-            var date = new Date(parts[0], parts[1] - 1, parts[2], parts[3]);
+            var date = parts.length >= 4 ?
+                new Date(parts[0], parts[1] - 1, parts[2], parts[3]) :
+                d3.select(DISPLAY_ID).attr("data-samples").indexOf("current") > 0 ? new Date() : null;
+
             if (isFinite(+date)) {
                 date.setHours(date.getHours() + offset);
                 window.location.href = "/map/wind/" +
@@ -699,11 +702,12 @@
         if (data.length === 0) {
             return d.reject("No Data in Response");
         }
-        if (data.length < 5) {
+
+        var stations = buildStationNodes(data[0].samples, settings.projection);
+        if (stations.length < 5) {
             return d.reject("東京都環境局がデータを調整中");
         }
 
-        var stations = buildStationNodes(data[0].samples, settings.projection);
         var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
 
         var columns = [];
