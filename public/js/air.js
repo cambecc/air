@@ -699,6 +699,9 @@
         if (data.length === 0) {
             return d.reject("No Data in Response");
         }
+        if (data.length < 5) {
+            return d.reject("東京都環境局がデータを調整中");
+        }
 
         var stations = buildStationNodes(data[0].samples, settings.projection);
         var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
