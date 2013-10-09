@@ -179,14 +179,19 @@ function pollP160ForUpdates() {
     var promises = [doP160Page(1), doP160Page(2)];
 
     function sumRowCounts(current, value) {
-        var result = value && value[0] || {rowCount: 0};
-        return current + result.rowCount;  // abstraction leakage -- relying on rowCount to exist
+        if (value) {
+            value.forEach(function(result) {
+                current += result.rowCount;  // abstraction leakage -- relying on rowCount to exist
+            });
+        }
+        return current;
     }
 
     return when.reduce(promises, sumRowCounts, 0).then(
         function(rowsInsertedOrUpdated) {
             log.info("results of poll: rowsInsertedOrUpdated = " + rowsInsertedOrUpdated);
-            var foundNewData = rowsInsertedOrUpdated >= 2;  // ugh.
+            // Expect at least 60 samples, otherwise scrape not successful. Ugh.
+            var foundNewData = rowsInsertedOrUpdated >= 60;
             if (foundNewData) {
                 log.info("resetting query memos");
                 api.resetQueryMemos();
@@ -244,7 +249,8 @@ function doP160Historical(hours) {
  * Look for new air data every hour.
  */
 function pollForUpdates() {
-    var ONE_MINUTE = 60 * 1000;
+    var ONE_SECOND = 1000;
+    var ONE_MINUTE = 60 * ONE_SECOND;
     var ONE_HOUR = 60 * ONE_MINUTE;
 
     // Wait an exponentially longer amount of time after each retry, up to 15 min.

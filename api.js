@@ -6,10 +6,12 @@ var _ = require("underscore");
 var express = require("express");
 var when = require("when");
 var db = require("./db");
+var schema = require("./schema");
 var tool = require("./tool");
 var log = tool.log();
 
 var port = process.argv[2];
+var validSampleTypes = schema.samples.columns.map(function(column) { return column.name; });
 
 // Cache index.html to serve it out. Changes require a restart to pick them up. Need to find a better way to do this.
 var indexHTML = "./public/index.html";
@@ -220,10 +222,10 @@ function parseDateParts(year, month, day, hour) {
 }
 
 /**
- * Casts v to a Number if it is truthy, otherwise null.
+ * Casts v to a Number if it is a finite number, otherwise null.
  */
 function asNullOrNumber(v) {
-    return v ? +v : null;
+    return _.isFinite(v) ? +v : null;
 }
 
 /**
@@ -233,12 +235,12 @@ function dateMax(a, b) {
     return a < b ? b : a;  // Wish I could use Math.max here...
 }
 
-function buildResponse(rows) {
-    // Build JSON response like this:
+function buildResponse(sampleType, rows) {
+    // Build JSON response like this, where sampleType is "no2":
     //  [
     //    {
     //      "date": "2013-09-04 16:00:00+09:00",
-    //      "samples": [ {"stationId": "101", "coordinates": [139.768119, 35.692752], "wind": [90, 0.6]}, ... ]
+    //      "samples": [{"stationId": "101", "coordinates": [139.768119, 35.692752], "wind": [90, 0.6], "no2": 3}, ...]
     //    },
     //    ...
     //  ]
@@ -250,14 +252,24 @@ function buildResponse(rows) {
         if (!bucket) {
             buckets[date] = bucket = [];
         }
-        if (!_.isFinite(row.wd) || !_.isFinite(row.wv)) {
+        var wd = asNullOrNumber(row.wd);
+        var wv = asNullOrNumber(row.wv);
+        var datum = sampleType ? asNullOrNumber(row[sampleType]) : null;
+
+        // skip rows that have no data
+        if (!(_.isFinite(wd) && _.isFinite(wv)) && !_.isFinite(datum)) {
             return;
         }
-        bucket.push({
+
+        var sample = {
             stationId: row.stationId.toString(),
             coordinates: [asNullOrNumber(row.longitude), asNullOrNumber(row.latitude)],
-            wind: [asNullOrNumber(row.wd), asNullOrNumber(row.wv)]
-        });
+            wind: [wd, wv]
+        };
+        if (sampleType) {
+            sample[sampleType] = datum;
+        }
+        bucket.push(sample);
     });
 
     var result = [];
@@ -270,8 +282,13 @@ function buildResponse(rows) {
 }
 
 function doQuery(constraints) {
-    var stmt = db.selectSamplesCompact(constraints, ["date", "stationId", "longitude", "latitude", "wv", "wd"]);
-    return db.execute(stmt).then(buildResponse);
+    var columns = ["date", "stationId", "longitude", "latitude", "wv", "wd"];
+    var sampleType = constraints.sampleType;
+    if (sampleType) {
+        columns.push(sampleType);
+    }
+    var stmt = db.selectSamplesCompact(constraints, columns);
+    return db.execute(stmt).then(buildResponse.bind(null, sampleType));
 }
 
 function memoize(f, maxEntries) {
@@ -314,30 +331,52 @@ function query(res, constraints) {
     return queryTask.then(sendResponse).then(null, handleUnexpected.bind(null, res));
 }
 
-app.get("/data/wind/current", function(req, res) {
-    try {
-        query(res, {date: {current: true, parts: [], zone: "+09:00"}});
-    }
-    catch (error) {
-        handleUnexpected(res, error);
-    }
-});
+function isValid(sampleType) {
+    return sampleType === "wind" ||
+        sampleType !== "stationId" && sampleType !== "date" && _.contains(validSampleTypes, sampleType);
+}
 
-app.get("/data/wind/:year/:month/:day/:hour", function(req, res) {
+app.get("/data/:type/current", function(req, res) {
     try {
-        var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
-        if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
+        var sampleType = req.params.type;
+        if (!isValid(sampleType)) {
             return res.send(400);
         }
-        query(res, {date: {current: false, parts: parts, zone: "+09:00"}});
+        var constraints = {date: {current: true, parts: [], zone: "+09:00"}};
+        if (sampleType !== "wind") {
+            constraints.sampleType = sampleType;
+        }
+        query(res, constraints);
     }
     catch (error) {
         handleUnexpected(res, error);
     }
 });
 
-app.get("/map/wind/current", function(req, res) {
+app.get("/data/:type/:year/:month/:day/:hour", function(req, res) {
     try {
+        var sampleType = req.params.type;
+        var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
+        if (!isValid(sampleType) || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
+            return res.send(400);
+        }
+        var constraints = {date: {current: false, parts: parts, zone: "+09:00"}};
+        if (sampleType !== "wind") {
+            constraints.sampleType = sampleType;
+        }
+        query(res, constraints);
+    }
+    catch (error) {
+        handleUnexpected(res, error);
+    }
+});
+
+app.get("/map/:type/current", function(req, res) {
+    try {
+        var sampleType = req.params.type;
+        if (!isValid(sampleType)) {
+            return res.send(400);
+        }
         prepareLastModified(res, indexHTMLDate);
         res.send(indexHTMLText);
     }
@@ -349,10 +388,11 @@ app.get("/map/wind/current", function(req, res) {
 var windRegex = /\/data\/wind\/current/;  // for replacing value of '/data/wind/current' in index.html
 var dateRegex = /data-date="/;  // for inserting the date of the samples when specified
 
-app.get("/map/wind/:year/:month/:day/:hour", function(req, res) {
+app.get("/map/:type/:year/:month/:day/:hour", function(req, res) {
     try {
+        var sampleType = req.params.type;
         var parts = parseDateParts(req.params.year, req.params.month, req.params.day, req.params.hour);
-        if (isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
+        if (!isValid(sampleType) || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2]) || isNaN(parts[3])) {
             return res.send(400);
         }
         var date = tool.toISOString({year: parts[0], month: parts[1], day: parts[2], hour: parts[3]});
