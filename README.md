@@ -62,7 +62,7 @@ Building this project required solutions to some interesting problems. Here are 
      Infrastructure, Transport and Tourism, as an 80MB XML file. This data was transformed
      to a 300KB [TopoJSON](https://github.com/mbostock/topojson) file, small
      enough for browsers to download and render as SVG with [D3](http://d3js.org/).
-   * Roughly 50 sampling stations provide hourly wind data.
+   * Roughly 50 sampling stations provide hourly wind and pollutant data.
      [Inverse Distance Weighting](http://en.wikipedia.org/wiki/Inverse_distance_weighting)
      interpolation is used to construct a wind vector field that covers all of Tokyo. IDW
      produces strange artifacts and is considered obsolete, but it is very simple and was
@@ -70,6 +70,9 @@ Building this project required solutions to some interesting problems. Here are 
    * The browser interpolates each point (x, y) using the n-closest sampling stations. To
      determine the n-closest neighbors, the client constructs a [k-d tree](
      http://en.wikipedia.org/wiki/K-d_tree), which greatly improves the performance.
+   * Pollutant visualization overlays use [Thin Plate Spline](http://en.wikipedia.org/wiki/Thin_plate_spline)
+     interpolation. TPS is definitely the wrong method to use for natural phenomenon such
+     as air pollutants, but it produces a smoother surface than IDW.
    * The SVG map of Tokyo is overlaid with an HTML5 Canvas, where the animation is drawn.
      The animation renderer needs to know where the borders of Tokyo are rendered
      by the SVG engine, but this information is extremely difficult to obtain.
