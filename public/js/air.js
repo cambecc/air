@@ -824,7 +824,7 @@
                         // Map to logarithmic range [1, 101] then back to [0, 1]. Seems legit.
                         z = Math.log(z * 100 + 1) / LN101;
                     }
-                    g.fillStyle = asRainbowColorStyle(z, 0.5);
+                    g.fillStyle = asRainbowColorStyle(z, 0.6);
                     g.fillRect(x, y, 2, 2);
                 }
             }
