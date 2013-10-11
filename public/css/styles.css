@@ -27,7 +27,7 @@ body {
 
 .in-boundary {
     fill: none;
-    stroke: #505050;
+    stroke: #585858;
     stroke-width: 1.5;
     stroke-dasharray: 2, 2;
     stroke-linejoin: round;
@@ -52,7 +52,7 @@ body {
     position: relative;
 }
 
-#field {
+#field, #overlay {
     position: absolute;
     top: 0;
     left: 0;
@@ -80,11 +80,28 @@ body {
 }
 
 h1, h2 {
-    font-size: 2.5em;
+    font-size: 2.4em;
+}
+
+h3 {
+    font-size: 1.5em;
+    line-height: 2.4em;
 }
 
 p, span {
     font-size: 1.75em;
+}
+
+.sup {
+    position: relative;
+   	bottom: 0.3em;
+   	font-size: 0.6em;
+}
+
+.sub {
+    position: relative;
+   	top: 0.3em;
+   	font-size: 0.6em;
 }
 
 a, .text-button {

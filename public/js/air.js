@@ -6,7 +6,7 @@
  *
  * https://github.com/cambecc/air
  */
-(function () {
+(function() {
     "use strict";
 
     var τ = 2 * Math.PI;
@@ -18,10 +18,12 @@
     // special document elements
     var MAP_SVG_ID = "#map-svg";
     var FIELD_CANVAS_ID = "#field-canvas";
+    var OVERLAY_CANVAS_ID = "#overlay-canvas";
     var DISPLAY_ID = "#display";
     var LOCATION_ID = "#location";
+    var SAMPLE_LABEL_ID = "#sample-label";
     var STATUS_ID = "#status";
-    var WIND_ID = "#wind";
+    var POINT_DETAILS_ID = "#point-details";
     var PREVIOUS_DAY_ID = "#previous-day";
     var PREVIOUS_HOUR_ID = "#previous-hour";
     var NEXT_HOUR_ID = "#next-hour";
@@ -30,6 +32,33 @@
     var SHOW_LOCATION_ID = "#show-location";
     // var STOP_ANIMATION_ID = "#stop-animation";
     var POSITION_ID = "#position";
+
+    // metadata about each type of overlay
+    var OVERLAY_TYPES = {
+        "temp": {min: -10,   max: 35,    scale: "line", precision: 1, label: "気温 Temperature", unit: "ºC"},
+        "hum":  {min: 0,     max: 100,   scale: "line", precision: 1, label: "湿度 Humidity", unit: "%"},
+        "wv":   {min: 1,     max: 20,    scale: "log",  precision: 1, label: "風速 Wind Velocity", unit: " m/s"},
+        "in":   {min: 0.1,   max: 4.0,   scale: "log",  precision: 2, label: "日射量 Insolation", unit: ' MJ/m<span class="sup">2</span>'},
+        "no":   {min: 0.001, max: 0.600, scale: "log",  precision: 0, label: "一酸化窒素 Nitric Monoxide", unit: " ppb", multiplier: 1000},
+        "no2":  {min: 0.001, max: 0.200, scale: "log",  precision: 0, label: "二酸化窒素 Nitrogen Dioxide", unit: " ppb", multiplier: 1000},
+        "nox":  {min: 0.001, max: 0.600, scale: "log",  precision: 0, label: "窒素酸化物 Nitrogen Oxides", unit: " ppb", multiplier: 1000},
+        "ox":   {min: 0.001, max: 0.250, scale: "log",  precision: 0, label: "光化学オキシダント Photochemical Oxidants", unit: " ppb", multiplier: 1000},
+        "so2":  {min: 0.001, max: 0.110, scale: "log",  precision: 0, label: "二酸化硫黄 Sulfur Dioxide", unit: " ppb", multiplier: 1000},
+        "co":   {min: 0.1,   max: 3.0,   scale: "log",  precision: 1, label: "一酸化炭素 Carbon Monoxide", unit: " ppm"},
+        "ch4":  {min: 1.5,   max: 3.0,   scale: "log",  precision: 2, label: "メタン Methane", unit: " ppm"},
+        "nmhc": {min: 0.01,  max: 1.30,  scale: "log",  precision: 2, label: "非メタン炭化水素 Non-Methane Hydrocarbons", unit: " ppm"},
+        "spm":  {min: 1,     max: 750,   scale: "log",  precision: 0, label: "浮遊粒子状物質 Suspended Particulate Matter", unit: ' μg/m<span class="sup">3</span>'},
+        "pm25": {min: 1,     max: 750,   scale: "log",  precision: 0, label: "微小粒子状物質 2.5µm Particulate Matter", unit: ' μg/m<span class="sup">3</span>'}
+    };
+
+    // extract parameters sent to us by the server
+    var displayData = {
+        topography: d3.select(DISPLAY_ID).attr("data-topography"),
+        samples: d3.select(DISPLAY_ID).attr("data-samples"),
+        type: d3.select(DISPLAY_ID).attr("data-type"),
+        date: d3.select(DISPLAY_ID).attr("data-date")
+    };
+    var overlayType = OVERLAY_TYPES[displayData.type];
 
     /**
      * Returns an object holding parameters for the animation engine, scaled for view size and type of browser.
@@ -59,7 +88,7 @@
         };
         log.debug(JSON.stringify(view) + " " + JSON.stringify(settings));
         for (var j = 85; j <= 255; j += 5) {
-            styles.push("rgba(" + j + ", " + j + ", " + j + ", 1)");
+            styles.push(asColorStyle(j, j, j, 1));
         }
         return settings;
     }
@@ -85,6 +114,32 @@
         return {width: x, height: y};
     }();
 
+    function asColorStyle(r, g, b, a) {
+        return "rgba(" + r + ", " + g + ", " + b + ", " + a + ")";
+    }
+
+    /**
+     * Produces a color style in a rainbow-like trefoil color space. Not quite HSV, but produces a nice
+     * spectrum. See http://krazydad.com/tutorials/makecolors.php.
+     *
+     * @param hue the hue rotation in the range [0, 1]
+     * @param a the alpha value in the range [0, 1]
+     * @returns {String} rgba style string
+     */
+    function asRainbowColorStyle(hue, a) {
+        // Map hue [0, 1] to radians [0, 5/6τ]. Don't allow a full rotation because that keeps hue == 0 and
+        // hue == 1 from mapping to the same color.
+        var rad = hue * τ * 5/6;
+        rad *= 0.75;  // increase frequency to 2/3 cycle per rad
+
+        var s = Math.sin(rad);
+        var c = Math.cos(rad);
+        var r = Math.floor(Math.max(0, -c) * 255);
+        var g = Math.floor(Math.max(s, 0) * 255);
+        var b = Math.floor(Math.max(c, 0, -s) * 255);
+        return asColorStyle(r, g, b, a);
+    }
+
     function init() {
         // Tweak document to distinguish CSS styling between touch and non-touch environments. Hacky hack.
         if ("ontouchstart" in document.documentElement) {
@@ -94,20 +149,27 @@
             document.documentElement.className += " no-touch";  // to filter styles problematic for touch
         }
 
-        // Modify the map and field elements to fill the screen.
+        // Modify the display elements to fill the screen.
         d3.select(MAP_SVG_ID).attr("width", view.width).attr("height", view.height);
         d3.select(FIELD_CANVAS_ID).attr("width", view.width).attr("height", view.height);
+        d3.select(OVERLAY_CANVAS_ID).attr("width", view.width).attr("height", view.height);
 
-        // Add event handlers for the navigation buttons.
+        // Show the overlay label, if any.
+        if (overlayType) {
+            d3.select(SAMPLE_LABEL_ID).attr("style", "display: inline").node().textContent = "+ " + overlayType.label;
+        }
+
+        // Add event handlers for the time navigation buttons.
         function navToHours(offset) {
-            var parts = d3.select(DISPLAY_ID).attr("data-date").split(/[- :]/);
+            var parts = displayData.date.split(/[- :]/);
             var date = parts.length >= 4 ?
                 new Date(parts[0], parts[1] - 1, parts[2], parts[3]) :
-                d3.select(DISPLAY_ID).attr("data-samples").indexOf("current") > 0 ? new Date() : null;
+                displayData.samples.indexOf("current") > 0 ? new Date() : null;
 
             if (isFinite(+date)) {
                 date.setHours(date.getHours() + offset);
-                window.location.href = "/map/wind/" +
+                window.location.href = "/map/" +
+                    displayData.type + "/" +
                     date.getFullYear() + "/" +
                     (date.getMonth() + 1) + "/" +
                     date.getDate() + "/" +
@@ -118,7 +180,22 @@
         d3.select(PREVIOUS_HOUR_ID).on("click", navToHours.bind(null, -1));
         d3.select(NEXT_HOUR_ID).on("click", navToHours.bind(null, +1));
         d3.select(NEXT_DAY_ID).on("click", navToHours.bind(null, +24));
-        d3.select(CURRENT_CONDITIONS_ID).on("click", function() { window.location.href = "/map/wind/current"; });
+        d3.select(CURRENT_CONDITIONS_ID).on("click", function() {
+            window.location.href = "/map/" + displayData.type + "/current";
+        });
+
+        // Add event handlers for the overlay navigation buttons.
+        function addNavToSampleType(type) {
+            d3.select("#" + type).on("click", function() {
+                window.location.href = displayData.samples.replace("/data/" + displayData.type, "/map/" + type);
+            });
+        }
+        for (var type in OVERLAY_TYPES) {
+            if (OVERLAY_TYPES.hasOwnProperty(type)) {
+                addNavToSampleType(type);
+            }
+        }
+        addNavToSampleType("wind");  // add the "None" overlay
     }
 
     /**
@@ -169,7 +246,9 @@
         var d = when.defer();
         d3.json(resource, function(error, result) {
             return error ?
-                d.reject({error: error.status, message: error.statusText, resource: resource}) :
+                !error.status ?
+                    d.reject({error: -1, message: "Cannot load resource: " + resource, resource: resource}) :
+                    d.reject({error: error.status, message: error.statusText, resource: resource}) :
                 d.resolve(result);
         });
         return d.promise;
@@ -366,204 +445,6 @@
     }
 
     /**
-     * Multiply the vector v (in rectangular [x, y] form) by the scalar s, in place, and return it.
-     */
-    function scaleVector(v, s) {
-        v[0] *= s;
-        v[1] *= s;
-        return v;
-    }
-
-    /**
-     * Add the second vector into the first and return it. Both vectors must be in rectangular [x, y] form.
-     */
-    function addVectors(a, b) {
-        a[0] += b[0];
-        a[1] += b[1];
-        return a;
-    }
-
-    /**
-     * Returns the square of the distance between the two specified points p0: [x0, y0] and p1: [x1, y1].
-     */
-    function distance2(p0, p1) {
-        var Δx = p0[0] - p1[0];
-        var Δy = p0[1] - p1[1];
-        return Δx * Δx + Δy * Δy;
-    }
-
-    /**
-     * Builds a k-d tree from the specified stations using each station's location. Each location should be made
-     * available as an array [x, y, ...], accessible via the key "location".
-     */
-    function kdTree(stations, k, depth) {
-        if (stations.length == 0) {
-            return null;
-        }
-        var axis = depth % k;  // cycle through each axis as we descend downwards
-        var compareByAxis = function(a, b) {
-            return a.location[axis] - b.location[axis];
-        }
-        stations.sort(compareByAxis);
-
-        // Pivot on the median station using the policy that all stations to the left must be _strictly smaller_.
-        var median = Math.floor(stations.length / 2);
-        var node = stations[median];
-        // Scan backwards for stations aligned on the same axis. We want the start of any such sequence.
-        while (median > 0 && compareByAxis(node, stations[median - 1]) === 0) {
-            node = stations[--median];
-        }
-
-        node.left = kdTree(stations.slice(0, median), k, depth + 1);
-        node.right = kdTree(stations.slice(median + 1), k, depth + 1);
-
-        // Provide a function that easily calculates a point's distance to the partitioning plane of this node.
-        var plane = node.location[axis];
-        node.planeDistance = function(p) { return plane - p[axis]; };
-
-        return node;
-    }
-
-    /**
-     * Given array a, representing a binary heap, this method pushes the key down from the top of the heap. After
-     * invocation, the key having the largest "distance2" value is at the top of the heap.
-     */
-    function heapify(a, key) {
-        var i = 0;
-        var length = a.length;
-        var child;
-        while ((child = i * 2 + 1) < length) {
-            var favorite = a[child];
-            var right = child + 1;
-            var r;
-            if (right < length && (r = a[right]).distance2 > favorite.distance2) {
-                favorite = r;
-                child = right;
-            }
-            if (key.distance2 >= favorite.distance2) {
-                break;
-            }
-            a[i] = favorite;
-            i = child;
-        }
-        a[i] = key;
-    }
-
-    /**
-     * Finds the neighbors nearest to the specified point, starting the search at the k-d tree provided as 'node'.
-     * The n closest neighbors are placed in the results array (of length n) in no defined order.
-     */
-    function nearest(point, node, results) {
-        // This recursive function descends the k-d tree, visiting partitions containing the desired point.
-        // As it descends, it keeps a priority queue of the closest neighbors found. Each visited node is
-        // compared against the worst (i.e., most distant) neighbor in the queue, replacing it if the current
-        // node is closer. The queue is implemented as a binary heap so the worst neighbor is always the
-        // element at the top of the queue.
-
-        // Calculate distance of the point to the plane this node uses to split the search space.
-        var planeDistance = node.planeDistance(point);
-
-        var containingSide;
-        var otherSide;
-        if (planeDistance <= 0) {
-            // point is contained in the right partition of the current node.
-            containingSide = node.right;
-            otherSide = node.left;
-        }
-        else {
-            // point is contained in the left partition of the current node.
-            containingSide = node.left;
-            otherSide = node.right;
-        }
-
-        if (containingSide) {
-            // Search the containing partition for neighbors.
-            nearest(point, containingSide, results);
-        }
-
-        // Now determine if the current node is a close neighbor. Do the comparison using _squared_ distance to
-        // avoid unnecessary Math.sqrt operations.
-        var d2 = distance2(point, node.location);
-        var n = results[0];
-        if (d2 < n.distance2) {
-            // Current node is closer than the worst neighbor encountered so far, so replace it and adjust the queue.
-            n.station = node;
-            n.distance2 = d2;
-            heapify(results, n);
-        }
-
-        if (otherSide) {
-            // The other partition *might* have relevant neighbors if the point is closer to the partition plane
-            // than the worst neighbor encountered so far. If so, descend down the other side.
-            if ((planeDistance * planeDistance) < results[0].distance2) {
-                nearest(point, otherSide, results);
-            }
-        }
-    }
-
-    /**
-     * Returns a function that performs inverse distance weighting (en.wikipedia.org/wiki/Inverse_distance_weighting)
-     * interpolation over the specified stations using k closest neighbors. The stations array must be comprised of
-     * elements with the structure {point: [x, y], sample: [vx, vy]}, where sample represents a vector in rectangular
-     * form.
-     *
-     * The returned function has the signature (x, y, result). When invoked, a zero vector should be passed as
-     * 'result' to provide the initial value. After invocation, result holds the interpolated vector vxi, vyi in its
-     * 0th and 1st elements, respectively.
-     */
-    function idw(stations, k) {
-
-        // Build a space partitioning tree to use for quick lookup of closest neighbors.
-        var tree = kdTree(stations, 2, 0);
-
-        // Define special scratch objects for intermediate calculations to avoid unnecessary array allocations.
-        var temp = [];
-        var nearestNeighbors = [];
-        for (var i = 0; i < k; i++) {
-            nearestNeighbors.push({});
-        }
-
-        function clear() {
-            for (var i = 0; i < k; i++) {
-                var n = nearestNeighbors[i];
-                n.station = null;
-                n.distance2 = Infinity;
-            }
-        }
-
-        // Return a function that interpolates a vector for the point (x, y) and stores it in "result".
-        return function(x, y, result) {
-            var weightSum = 0;
-
-            clear();  // reset our scratch objects
-            temp[0] = x;
-            temp[1] = y;
-
-            nearest(temp, tree, nearestNeighbors);  // calculate nearest neighbors
-
-            // Sum up the values at each nearest neighbor, adjusted by the inverse square of the distance.
-            for (var i = 0; i < k; i++) {
-                var neighbor = nearestNeighbors[i];
-                var sample = neighbor.station.sample;
-                var d2 = neighbor.distance2;
-                if (d2 === 0) {  // (x, y) is exactly on top of a station.
-                    result[0] = sample[0];
-                    result[1] = sample[1];
-                    return result;
-                }
-                var weight = 1 / d2;
-                temp[0] = sample[0];
-                temp[1] = sample[1];
-                result = addVectors(result, scaleVector(temp, weight));
-                weightSum += weight;
-            }
-
-            // Divide by the total weight to calculate an average, which is our interpolated result.
-            return scaleVector(result, 1 / weightSum);
-        }
-    }
-
-    /**
      * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector in pixel
      * space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this method returns
      * [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display would point _to_ the
@@ -580,6 +461,14 @@
     }
 
     /**
+     * Returns a human readable string for the provided coordinates.
+     */
+    function formatCoordinates(lng, lat) {
+        return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
+            Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+    }
+
+    /**
      * Returns a human readable string for the provided rectangular wind vector.
      */
     function formatVector(x, y) {
@@ -590,28 +479,31 @@
     }
 
     /**
-     * Returns a human readable string for the provided coordinates.
+     * Returns a human readable string for the provided overlay value.
      */
-    function formatCoordinates(lng, lat) {
-        return Math.abs(lat).toFixed(6) + "º " + (lat >= 0 ? "N" : "S") + ", " +
-               Math.abs(lng).toFixed(6) + "º " + (lng >= 0 ? "E" : "W");
+    function formatOverlayValue(v) {
+        v = Math.min(v, overlayType.max);
+        v = Math.max(v, Math.min(overlayType.min, 0));
+        if (overlayType.multiplier) {
+            v *= overlayType.multiplier;
+        }
+        return v.toFixed(overlayType.precision) + overlayType.unit;
     }
 
     /**
-     * Converts station samples to points in pixel space with a rectangular vector. These nodes are then used
-     * to drive interpolation of the vector field.
+     * Converts samples to points in pixel space with the form [x, y, v], where v is the sample value at that point.
+     * The transform callback extracts the value v from the sample, or null if the sample is not valid.
      */
-    function buildStationNodes(samples, projection) {
-        var nodes = [];
+    function buildPointsFromSamples(samples, projection, transform) {
+        var points = [];
         samples.forEach(function(sample) {
-            if (isValidSample(sample.wind)) {
-                nodes.push({
-                    location: projection(sample.coordinates),
-                    sample: polarToRectangular(sample.wind)
-                });
+            var point = projection(sample.coordinates);
+            var value = transform(sample);
+            if (value !== null) {
+                points.push([point[0], point[1], value]);
             }
         });
-        return nodes;
+        return points;
     }
 
     /**
@@ -695,22 +587,25 @@
     function interpolateField(data, settings, masks) {
         log.time("interpolating field");
         var d = when.defer();
-        var bounds = settings.displayBounds;
-        var displayMask = masks.displayMask;
-        var fieldMask = masks.fieldMask;
 
         if (data.length === 0) {
             return d.reject("No Data in Response");
         }
 
-        var stations = buildStationNodes(data[0].samples, settings.projection);
-        if (stations.length < 5) {
+        var points = buildPointsFromSamples(data[0].samples, settings.projection, function(sample) {
+            return isValidSample(sample.wind) ? polarToRectangular(sample.wind) : null;
+        });
+
+        if (points.length < 5) {
             return d.reject("東京都環境局がデータを調整中");
         }
 
-        var interpolate = idw(stations, 5);  // Use the five closest neighbors to interpolate
+        var interpolate = mvi.inverseDistanceWeighting(points, 5);  // Use the five closest neighbors
 
         var columns = [];
+        var bounds = settings.displayBounds;
+        var displayMask = masks.displayMask;
+        var fieldMask = masks.fieldMask;
         var xBound = bounds.x + bounds.width;  // upper bound (exclusive)
         var yBound = bounds.y + bounds.height;  // upper bound (exclusive)
         var x = bounds.x;
@@ -737,7 +632,7 @@
                         v = [0, 0, 0];
                         v = interpolate(x, y, v);
                         v[2] = displayMask(x, y) ? Math.sqrt(v[0] * v[0] + v[1] * v[1]) : INVISIBLE;
-                        v = scaleVector(v, settings.velocityScale);
+                        v = mvi.scaleVector(v, settings.velocityScale);
                     }
                     column[y - offset] = v;
                 }
@@ -762,7 +657,7 @@
                     }
                 }
                 var date = data[0].date.replace(":00+09:00", "");
-                d3.select(DISPLAY_ID).attr("data-date", date);
+                d3.select(DISPLAY_ID).attr("data-date", displayData.date = date);
                 displayStatus(date + " JST");
                 d.resolve(createField(columns));
                 log.timeEnd("interpolating field");
@@ -869,7 +764,96 @@
         })();
     }
 
-    function postInit(settings, field) {
+    /**
+     * Draws the overlay on top of the map. This process involves building a thin plate spline interpolation from
+     * the sample data, then walking the canvas and drawing colored rectangles at each point.
+     */
+    function drawOverlay(data, settings, masks) {
+        if (!overlayType) {
+            return when.resolve(null);
+        }
+
+        log.time("drawing overlay");
+        var d = when.defer();
+
+        if (data.length === 0) {
+            return d.reject("No Data in Response");
+        }
+
+        var points = buildPointsFromSamples(data[0].samples, settings.projection, function(sample) {
+            var datum = sample[displayData.type];
+            return datum == +datum ? datum : null;
+        });
+
+        if (points.length < 3) {  // we need at least three samples to interpolate
+            return d.reject("東京都環境局がデータを調整中");
+        }
+
+        var min = overlayType.min;
+        var max = overlayType.max;
+        var range = max - min;
+        var rigidity = range * 0.05;  // use 5% of range as the rigidity
+
+        var interpolate = mvi.thinPlateSpline(points, rigidity);
+
+        var g = d3.select(OVERLAY_CANVAS_ID).node().getContext("2d");
+        var isLogarithmic = (overlayType.scale === "log");
+        var LN101 = Math.log(101);
+        var bounds = settings.displayBounds;
+        var displayMask = masks.displayMask;
+        var xBound = bounds.x + bounds.width;  // upper bound (exclusive)
+        var yBound = bounds.y + bounds.height;  // upper bound (exclusive)
+        var x = bounds.x;
+
+        // Draw color scale for reference.
+        var n = view.width / 5;
+        for (var i = n; i >= 0; i--) {
+            g.fillStyle = asRainbowColorStyle((1 - (i / n)), 0.9);
+            g.fillRect(view.width - 10 - i, view.height - 20, 1, 10);
+        }
+
+        // Draw a column by interpolating a value for each point and painting a 2x2 rectangle
+        function drawColumn(x) {
+            for (var y = bounds.y; y < yBound; y += 2) {
+                if (displayMask(x, y)) {
+                    // Clamp interpolated z value to the range [min, max].
+                    var z = Math.min(Math.max(interpolate(x, y), min), max);
+                    // Now map to range [0, 1].
+                    z = (z - min) / range;
+                    if (isLogarithmic) {
+                        // Map to logarithmic range [1, 101] then back to [0, 1]. Seems legit.
+                        z = Math.log(z * 100 + 1) / LN101;
+                    }
+                    g.fillStyle = asRainbowColorStyle(z, 0.5);
+                    g.fillRect(x, y, 2, 2);
+                }
+            }
+        }
+
+        (function batchDraw() {
+            try {
+                var start = +new Date;
+                while (x < xBound) {
+                    drawColumn(x);
+                    x += 2;
+                    if ((+new Date - start) > MAX_TASK_TIME) {
+                        // Drawing is taking too long. Schedule the next batch for later and yield.
+                        setTimeout(batchDraw, MIN_SLEEP_TIME);
+                        return;
+                    }
+                }
+                d.resolve(interpolate);
+                log.timeEnd("drawing overlay");
+            }
+            catch (e) {
+                d.reject(e);
+            }
+        })();
+
+        return d.promise;
+    }
+
+    function postInit(settings, field, overlay) {
         d3.select(SHOW_LOCATION_ID).on("click", function() {
             plotCurrentPosition(settings.projection);
         });
@@ -882,7 +866,11 @@
             var v = field(p[0], p[1]);
             if (v[2] >= INVISIBLE) {
                 d3.select(LOCATION_ID).node().textContent = "⁂ " + formatCoordinates(c[0], c[1]);
-                d3.select(WIND_ID).node().textContent = "⁂ " + formatVector(v[0], v[1]);
+                var pointDetails = "⁂ " + formatVector(v[0], v[1]);
+                if (overlay) {
+                    pointDetails += " | " + formatOverlayValue(overlay(p[0], p[1]));
+                }
+                d3.select(POINT_DETAILS_ID).node().innerHTML = pointDetails;
             }
         });
     }
@@ -895,16 +883,17 @@
     // Let's try an experiment! Define a dependency graph of tasks and use promises to let the control flow occur
     // organically. Any errors will cause dependent tasks to be skipped.
 
-    var topoTask            = loadJson(d3.select(DISPLAY_ID).attr("data-topography"));
-    var dataTask            = loadJson(d3.select(DISPLAY_ID).attr("data-samples"));
-    var initTask            = when.all([true                                ]).then(apply(init));
-    var settingsTask        = when.all([topoTask                            ]).then(apply(createSettings));
-    var meshTask            = when.all([topoTask, settingsTask              ]).then(apply(buildMeshes));
-    var renderTask          = when.all([settingsTask, meshTask              ]).then(apply(render));
-    var plotStationsTask    = when.all([dataTask, meshTask                  ]).then(apply(plotStations));
-    var interpolateTask     = when.all([dataTask, settingsTask, renderTask  ]).then(apply(interpolateField));
-    var postInitTask        = when.all([settingsTask, interpolateTask       ]).then(apply(postInit));
-    var animateTask         = when.all([settingsTask, interpolateTask       ]).then(apply(animate));
+    var topoTask         = loadJson(displayData.topography);
+    var dataTask         = loadJson(displayData.samples);
+    var initTask         = when.all([true                                 ]).then(apply(init));
+    var settingsTask     = when.all([topoTask                             ]).then(apply(createSettings));
+    var meshTask         = when.all([topoTask, settingsTask               ]).then(apply(buildMeshes));
+    var renderTask       = when.all([settingsTask, meshTask               ]).then(apply(render));
+    var plotStationsTask = when.all([dataTask, meshTask                   ]).then(apply(plotStations));
+    var overlayTask      = when.all([dataTask, settingsTask, renderTask   ]).then(apply(drawOverlay));
+    var fieldTask        = when.all([dataTask, settingsTask, renderTask   ]).then(apply(interpolateField));
+    var animateTask      = when.all([settingsTask, fieldTask              ]).then(apply(animate));
+    var postInitTask     = when.all([settingsTask, fieldTask, overlayTask ]).then(apply(postInit));
 
     // Register a catch-all error handler to log errors rather then let them slip away into the ether.... Cleaner way?
     when.all([
@@ -915,9 +904,10 @@
         meshTask,
         renderTask,
         plotStationsTask,
-        interpolateTask,
-        postInitTask,
-        animateTask
+        overlayTask,
+        fieldTask,
+        animateTask,
+        postInitTask
     ]).then(null, report);
 
 })();

@@ -371,22 +371,29 @@ app.get("/data/:type/:year/:month/:day/:hour", function(req, res) {
     }
 });
 
+var samplesRegex = /data-samples="\/data\/wind\/current"/;  // index.html parameter for samples url
+var typeRegex = /data-type="wind"/;  // index.html parameter for sample type
+var dateRegex = /data-date=""/;  // index.html parameter for date of the samples, when specified
+
 app.get("/map/:type/current", function(req, res) {
     try {
         var sampleType = req.params.type;
         if (!isValid(sampleType)) {
             return res.send(400);
         }
+
+        // Perform replacements -- should probably use a proper templating engine...
+        var text = indexHTMLText;
+        text = text.replace(typeRegex, tool.format('data-type="{0}"', sampleType));
+        text = text.replace(samplesRegex, tool.format('data-samples="/data/{0}/current"', sampleType));
+
         prepareLastModified(res, indexHTMLDate);
-        res.send(indexHTMLText);
+        res.send(text);
     }
     catch (error) {
         handleUnexpected(res, error);
     }
 });
-
-var windRegex = /\/data\/wind\/current/;  // for replacing value of '/data/wind/current' in index.html
-var dateRegex = /data-date="/;  // for inserting the date of the samples when specified
 
 app.get("/map/:type/:year/:month/:day/:hour", function(req, res) {
     try {
@@ -396,8 +403,12 @@ app.get("/map/:type/:year/:month/:day/:hour", function(req, res) {
             return res.send(400);
         }
         var date = tool.toISOString({year: parts[0], month: parts[1], day: parts[2], hour: parts[3]});
-        var text = indexHTMLText.replace(windRegex, "/data/wind/" + parts.join("/"));
-        text = text.replace(dateRegex, 'data-date="' + date.substr(0, date.length - 1));  // strip off 'Z'
+
+        // Perform replacements -- should probably use a proper templating engine...
+        var text = indexHTMLText;
+        text = text.replace(typeRegex, tool.format('data-type="{0}"', sampleType));
+        text = text.replace(samplesRegex, tool.format('data-samples="/data/{0}/{1}"', sampleType, parts.join("/")));
+        text = text.replace(dateRegex, tool.format('data-date="{0}"', date.substr(0, date.length - 1)));  // remove 'Z'
 
         prepareLastModified(res, indexHTMLDate);
         res.send(text);
@@ -440,10 +451,11 @@ function cacheControl() {
 
     var rules = [
         // very-short-lived
-        [/data\/wind\/current/, 1 * MINUTE],
+        [/data\/.*\/current/, 1 * MINUTE],
 
         // short-lived (default behavior for all other resources)
         [/js\/air\.js/, DEFAULT],  // override medium-lived .js rule below
+        [/js\/mvi\.js/, DEFAULT],  // override medium-lived .js rule below
 
         // medium-lived
         [/js\/.*\.js/, 5 * DAY],

@@ -14,19 +14,24 @@
 
     <!--[if lte IE 8]><p id="warn">Please upgrade to IE9 or newer.</p><![endif]-->
 
-    <div id="display" data-topography="/data/tokyo-topo.json" data-samples="/data/wind/current" data-date="">
+    <div id="display" data-topography="/data/tokyo-topo.json" data-samples="/data/wind/current"
+                      data-type="wind" data-date="">
         <div id="map">
             <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
         </div>
         <div id="field">
             <canvas id="field-canvas"></canvas>
         </div>
+        <div id="overlay">
+            <canvas id="overlay-canvas"></canvas>
+        </div>
         <div id="details">
             <h1 id="type">東京都風速</h1>
             <h1 id="type2">Tokyo Wind Speed</h1>
+            <h3 id="sample-label" style="display: none">&nbsp;</h3>
             <h2 id="status">&nbsp;</h2>
             <h2 id="location">&nbsp;</h2>
-            <h2 id="wind">&nbsp;</h2>
+            <h2 id="point-details">&nbsp;</h2>
         </div>
         <div id="arrow">↓</div>
     </div>
@@ -39,7 +44,24 @@
             <span class="text-button" id="next-hour">1時間後</span><span> – </span>
             <span class="text-button" id="next-day">翌日»</span><span> – </span>
             <span class="text-button" id="current-conditions">最新</span><span> – </span>
-            <span class="text-button" id="show-location">現在地</span>
+            <span class="text-button" id="show-location">現在地</span><p></p>
+        <span>Overlay | </span>
+            <span class="text-button" id="wind">None</span><span> – </span>
+            <span class="text-button" id="temp">Temp</span><span> – </span>
+            <span class="text-button" id="hum">Hum</span><span> – </span>
+            <span class="text-button" id="wv">WV</span><span> – </span>
+            <span class="text-button" id="in">IN</span><span> – </span>
+            <span class="text-button" id="no">NO</span><span> – </span>
+            <span class="text-button" id="no2">NO<span class="sub">2</span></span><span> – </span>
+            <span class="text-button" id="nox">NO<span class="sub">X</span></span><p></p>
+        <span style="visibility: hidden">Overlay | </span>
+            <span class="text-button" id="ox">O<span class="sub">X</span></span><span> – </span>
+            <span class="text-button" id="so2">SO<span class="sub">2</span></span><span> – </span>
+            <span class="text-button" id="co">CO</span><span> – </span>
+            <span class="text-button" id="ch4">CH<span class="sub">4</span></span><span> – </span>
+            <span class="text-button" id="nmhc">NMHC</span><span> – </span>
+            <span class="text-button" id="spm">SPM</span><span> – </span>
+            <span class="text-button" id="pm25">PM<span class="sub">2.5</span></span><p></p>
         <p>Gallery |
             <a href="/map/wind/2013/09/22/01">無風</a>,
             <a href="/map/wind/2013/08/21/15">そよ風</a>,
@@ -49,7 +71,6 @@
         <p>Air Data | <a href="http://www.kankyo.metro.tokyo.jp">東京都環境局環境改善部大気保全課</a></p>
         <p>Map Data |
             <a href="http://www.mlit.go.jp/kokudoseisaku/gis">国土数値情報（行政区域データ）国土交通省</a></p>
-        <p>Font | <a href="http://mplus-fonts.sourceforge.jp">M+ FONTS</a></p>
         <p>Author | Cameron Beccario <a href="https://twitter.com/cambecc">@cambecc</a></p>
         <p>Source | <a href="https://github.com/cambecc/air">github.com/cambecc/air</a></p>
         <p>Modules |
@@ -66,6 +87,7 @@
     <script src="/js/d3.v3.js" charset="utf-8"></script>
     <script src="/js/canvg.js" charset="utf-8"></script>
     <script src="/js/topojson.v1.js" charset="utf-8"></script>
+    <script src="/js/mvi.js" charset="utf-8"></script>
     <script src="/js/air.js" charset="utf-8"></script>
     <script>
         (function(i, s, o, g, r, a, m) {
