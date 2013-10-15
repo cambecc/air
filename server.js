@@ -89,7 +89,7 @@ function validateP160Header(header) {
     }
 }
 
-function processP160Row(row, date) {
+function processP160Row(row, date, counts) {
     /* 0   1    2   3   4  5  6   7   8  9   10   11  12    13   14  15   16   17
       番号 局番 局名 SO2 Ox NO NO2 NOx CO SPM NMHC CH4 PM2.5 風向 風速 気温 湿度 日射量 */
     var stationId = row[1] * 1;
@@ -114,6 +114,11 @@ function processP160Row(row, date) {
     addTag(item, "hum", row[16]);
     addTag(item, "in", row[17]);
 
+    if (item.hasOwnProperty("wd") && item.hasOwnProperty("wv")) {
+        // Increment each time we find a row with wind data.
+        counts.windData += 1;
+    }
+
     return db.upsert(schema.samples, item);
 }
 
@@ -131,7 +136,13 @@ function processP160(dom) {
 
     var date = extractP160DateTime(dom);
     var rows = scraper.extract(tables[3]);  // table at index three is the data
-    return rows.map(function(row) { return processP160Row(row, date); });
+    var counts = {windData: 0};
+    var statements = rows.map(function(row) { return processP160Row(row, date, counts); });
+    if (counts.windData < 5) {
+        log.error("insufficient wind data found:" + counts);  // the table we're scraping is probably incomplete
+        return null;
+    }
+    return statements;
 }
 
 function start() {
@@ -188,10 +199,10 @@ function pollP160ForUpdates() {
     }
 
     return when.reduce(promises, sumRowCounts, 0).then(
-        function(rowsInsertedOrUpdated) {
-            log.info("results of poll: rowsInsertedOrUpdated = " + rowsInsertedOrUpdated);
+        function(rowsInserted) {
+            log.info("results of poll: rowsInserted = " + rowsInserted);
             // Expect at least 60 samples, otherwise scrape not successful. Ugh.
-            var foundNewData = rowsInsertedOrUpdated >= 60;
+            var foundNewData = rowsInserted >= 60;
             if (foundNewData) {
                 log.info("resetting query memos");
                 api.resetQueryMemos();
@@ -253,9 +264,9 @@ function pollForUpdates() {
     var ONE_MINUTE = 60 * ONE_SECOND;
     var ONE_HOUR = 60 * ONE_MINUTE;
 
-    // Wait an exponentially longer amount of time after each retry, up to 15 min.
+    // Wait an exponentially longer amount of time after each retry, up to 8 min.
     function exponentialBackoff(t) {
-        return Math.min(Math.pow(2, t < 0 ? -(t + 1) : t), 15) * ONE_MINUTE;
+        return Math.min(Math.pow(2, t < 0 ? -(t + 1) : t), 8) * ONE_MINUTE;
     }
 
     // The air data is updated every hour, but we don't know exactly when. By specifying initialRetry = -1,

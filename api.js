@@ -247,11 +247,6 @@ function buildResponse(sampleType, rows) {
 
     var buckets = {};  // collect rows having common dates into buckets
     rows.rows.forEach(function(row) {
-        var date = row.date + ":00";
-        var bucket = buckets[date];
-        if (!bucket) {
-            buckets[date] = bucket = [];
-        }
         var wd = asNullOrNumber(row.wd);
         var wv = asNullOrNumber(row.wv);
         var datum = sampleType ? asNullOrNumber(row[sampleType]) : null;
@@ -268,6 +263,12 @@ function buildResponse(sampleType, rows) {
         };
         if (sampleType) {
             sample[sampleType] = datum;
+        }
+
+        var date = row.date + ":00";
+        var bucket = buckets[date];
+        if (!bucket) {
+            buckets[date] = bucket = [];
         }
         bucket.push(sample);
     });
