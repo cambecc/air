@@ -274,6 +274,10 @@ function buildResponse(sampleType, rows) {
         var wv = asNullOrNumber(row.wv);
         var datum = sampleType ? asNullOrNumber(row[sampleType]) : null;
 
+        if (row.stationId == 208) {
+            wd = wv = null;  // this station appears to have bogus wind readings
+        }
+
         // skip rows that have no data
         if (!(_.isFinite(wd) && _.isFinite(wv)) && !_.isFinite(datum)) {
             return;
