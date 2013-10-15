@@ -1,3 +1,26 @@
+/**
+ * api - a module that defines the behavior of the "air" http server.
+ *
+ * All files in air/public are mounted at /, and index.html is the primary driver of the visualization.
+ * index.html is reused to dynamically generate maps located at:
+ *
+ *     /map/wind/current
+ *     /map/wind/2013/10/31/15
+ *     /map/temp/current
+ *     /map/temp/2013/10/31/15
+ *     ... and so on
+ *
+ * The raw data for air samples is made available as JSON at the following paths:
+ *
+ *     /data/wind/current
+ *     /data/wind/2013/10/31/15
+ *     /data/temp/current
+ *     /data/temp/2013/10/31/15
+ *     ... and so on
+ *
+ * GETs on data paths cause SQL selects. The results are memoized to avoid repeated db hits.
+ */
+
 "use strict";
 
 var util = require("util");

@@ -1,3 +1,11 @@
+/**
+ * schema - a module that defines the structure of the two tables used to store air quality data.
+ *
+ * These structures are used by the "db" module to dynamically construct SQL commands. Just add a column
+ * to the structure below and a new table column gets added on startup. Probably there are lots of js
+ * projects that already do this much better...
+ */
+
 "use strict";
 
 exports.stations = {

@@ -1,3 +1,7 @@
+/**
+ * tool - a set of general utility functions
+ */
+
 "use strict";
 
 var _ = require("underscore");

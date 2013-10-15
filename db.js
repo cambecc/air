@@ -1,3 +1,10 @@
+/**
+ * db - a module that handles talking to the database (in this case, postgres).
+ *
+ * This module attempts to treat the database as an implementation detail. Methods are made available to
+ * create tables, drop tables, insert rows, select rows, etc., without the caller needing to deal with SQL.
+ */
+
 "use strict";
 
 var util = require("util");

@@ -1,3 +1,10 @@
+/**
+ * server - the main "air" server application.
+ *
+ * This module starts the database, scraper, and api components. It also processes the scraped data and
+ * sets up periodic scrapes. Could probably be much cleaner...
+ */
+
 "use strict";
 
 console.log("============================================================");

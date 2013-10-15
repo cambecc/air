@@ -1,3 +1,7 @@
+/**
+ * scraper - a set of utility methods to make scraping HTML easier
+ */
+
 "use strict";
 
 var when = require("when");
