@@ -72,6 +72,13 @@ body {
     font-size: 1.0em;
 }
 
+#notice {
+    position: absolute;
+    top: 5%;
+    right: 2%;
+    font-size: 1.0em;
+}
+
 #about {
     margin-top: 1.25em;
     padding-bottom: 1em;
