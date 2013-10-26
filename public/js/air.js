@@ -68,7 +68,7 @@
      */
     function createSettings(topo) {
         var isFF = /firefox/i.test(navigator.userAgent);
-        var projection = createProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
+        var projection = createAlbersProjection(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], view);
         var bounds = createDisplayBounds(topo.bbox[0], topo.bbox[1], topo.bbox[2], topo.bbox[3], projection);
         var styles = [];
         var settings = {
@@ -203,7 +203,7 @@
      * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
      * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
      */
-    function createProjection(lng0, lat0, lng1, lat1, view) {
+    function createAlbersProjection(lng0, lat0, lng1, lat1, view) {
         // Construct a unit projection centered on the bounding box. NOTE: center calculation will not be correct
         // when the bounding box crosses the 180th meridian. Don't expect that to happen to Tokyo for a while...
         var projection = d3.geo.albers()
@@ -445,19 +445,17 @@
     }
 
     /**
-     * Converts an into-the-wind polar vector in cardinal degrees to a with-the-wind rectangular vector in pixel
-     * space. For example, given wind _from_ the NW at 2 represented as the vector [315, 2], this method returns
-     * [1.4142..., 1.4142...], a vector (x, y) with magnitude 2, which when drawn on a display would point _to_ the
-     * SE (lower right).
+     * Converts a meteorological wind vector to a u,v-component vector in pixel space. For example, given wind
+     * from the NW at 2 represented as the vector [315, 2], this method returns [1.4142..., 1.4142...], a vector
+     * (u, v) with magnitude 2, which when drawn on a display would point to the SE (lower right). See
+     * http://mst.nerc.ac.uk/wind_vect_convs.html.
      */
-    function polarToRectangular(v) {
-        var wd_deg = v[0] + 180;  // convert into-the-wind cardinal degrees to with-the-wind
-        var cr = wd_deg / 360 * τ;  // convert to cardinal radians, clockwise
-        var wd_rad = Math.atan2(Math.cos(cr), Math.sin(cr));  // convert to standard radians, counter-clockwise
-        var wv = v[1];  // wind velocity
-        var x = Math.cos(wd_rad) * wv;
-        var y = -Math.sin(wd_rad) * wv;  // negate along y axis because pixel space grows downwards
-        return [x, y];  // rectangular form wind vector in pixel space
+    function componentize(wind) {
+        var φ = wind[0] / 360 * τ;  // meteorological wind direction in radians
+        var m = wind[1];  // wind velocity, m/s
+        var u = -m * Math.sin(φ);  // u component, zonal velocity
+        var v = -m * Math.cos(φ);  // v component, meridional velocity
+        return [u, -v];  // negate v because pixel space grows downwards
     }
 
     /**
@@ -593,7 +591,7 @@
         }
 
         var points = buildPointsFromSamples(data[0].samples, settings.projection, function(sample) {
-            return isValidSample(sample.wind) ? polarToRectangular(sample.wind) : null;
+            return isValidSample(sample.wind) ? componentize(sample.wind) : null;
         });
 
         if (points.length < 5) {

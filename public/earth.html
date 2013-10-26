@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Earth</title>
+    <link rel="shortcut icon" href="/favicon.ico"/>
+    <link rel="stylesheet" type="text/css" href="/css/styles.css"/>
+</head>
+<body>
+
+    <div id="display" data-topography="/data/land-topo.json">
+        <div id="map">
+            <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1"></svg>
+        </div>
+        <div id="field">
+            <canvas id="field-canvas"></canvas>
+        </div>
+        <div id="details">
+            <h1 id="type">Earth</h1>
+        </div>
+    </div>
+
+    <script src="/js/when.js" charset="utf-8"></script>
+    <script src="/js/d3.v3.js" charset="utf-8"></script>
+    <script src="/js/canvg.js" charset="utf-8"></script>
+    <script src="/js/topojson.v1.js" charset="utf-8"></script>
+    <script src="/js/util.js" charset="utf-8"></script>
+    <script src="/js/mvi.js" charset="utf-8"></script>
+    <script src="/js/earth.js" charset="utf-8"></script>
+
+</body>
+</html>
