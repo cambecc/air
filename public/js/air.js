@@ -319,10 +319,10 @@
      * (x, y) is not masked.
      *
      * The field mask defines the area where the wind vector field is available. The field extends beyond the
-     * borders fo the visible map to provide a more natural looking animation (particles don't die immediately
+     * borders of the visible map to provide a more natural looking animation (particles don't die immediately
      * upon hitting the visible border).
      *
-     * The display mask defines the area where the animation is actually visible on screen.
+     * The display mask defines the area where the animation is visible on screen.
      */
     function renderMasks(mesh, settings) {
         displayStatus("Rendering masks...");
@@ -353,7 +353,7 @@
         g.lineWidth = 2;
         g.stroke();
 
-        // d3.select(DISPLAY_ID).node().appendChild(canvas);  // uncomment to make mask visible
+        // d3.select(DISPLAY_ID).node().appendChild(canvas);  // uncomment to make mask visible for debugging
 
         var width = canvas.width;
         var data = g.getImageData(0, 0, canvas.width, canvas.height).data;
