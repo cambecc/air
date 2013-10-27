@@ -74,12 +74,12 @@ Building this project required solutions to some interesting problems. Here are 
      interpolation. TPS is definitely the wrong method to use for natural phenomenon such
      as air pollutants, but it produces a smoother surface than IDW.
    * The SVG map of Tokyo is overlaid with an HTML5 Canvas, where the animation is drawn.
-     The animation renderer needs to know where the borders of Tokyo are rendered
-     by the SVG engine, but this information is extremely difficult to obtain.
-     To workaround this problem, the [canvg](http://code.google.com/p/canvg/) library
-     is used to re-render Tokyo's polygons to a detached Canvas element, and the Canvas'
-     pixels operate as a mask to distinguish points that lie inside the map to those
-     outside.
+     The animation renderer needs to know where the borders of Tokyo are rendered by the
+     SVG engine, but this pixel-for-pixel information is difficult to obtain directly
+     from the SVG elements. To workaround this problem, Tokyo's polygons are re-rendered
+     to a detached Canvas element, and the Canvas' pixels operate as a mask to distinguish
+     points that lie inside the map to those outside. The field mask occupies the red
+     color channel, and the display mask is encoded in the green color channel.
    * I used [when.js](https://github.com/cujojs/when) in the browser because it was a fun
      experiment.
 
