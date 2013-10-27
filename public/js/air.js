@@ -377,7 +377,7 @@
      * Draws the map on screen and returns a promise for the rendered field and display masks.
      */
     function render(settings, mesh) {
-        when(renderMap(mesh))
+        return when(renderMap(mesh))
             .then(nap)  // temporarily yield control back to the browser to maintain responsiveness
             .then(renderMasks.bind(null, mesh, settings));
     }
