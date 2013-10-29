@@ -16,8 +16,10 @@ mvi = function() {
 
     var mvi = {
         scaleVector: scaleVector,
+        addVectors: addVectors,
         inverseDistanceWeighting: inverseDistanceWeighting,
-        thinPlateSpline: thinPlateSpline
+        thinPlateSpline: thinPlateSpline,
+        bilinear: bilinear
     };
 
     /**
@@ -458,5 +460,32 @@ mvi = function() {
     }
 
     return mvi;
+
+    /**
+     * UNDONE
+     */
+    function bilinear(x, y, ll, lr, ul, ur) {
+        // f(0, 0)(1 - x)(1 - y) + f(1, 0)x(1-y) + f(0, 1)(1 - x)y + f(1, 1)xy
+
+        // console.log([x, y]);
+        if (x < 0 || 1 < x || y < 0 || 1 < y) {
+            throw new Error("hrm: " + [x, y]);
+        }
+
+        var v00 = [ll[2][0], ll[2][1]];
+        scaleVector(v00, (1 - x) * (1 - y));
+        var v01 = [lr[2][0], lr[2][1]];
+        scaleVector(v01, (x) * (1 - y));
+        var v10 = [ul[2][0], ul[2][1]];
+        scaleVector(v10, (1 - x) * (y));
+        var v11 = [ur[2][0], ur[2][1]];
+        scaleVector(v11, (x) * (y));
+
+        addVectors(v00, v01);
+        addVectors(v00, v10);
+        addVectors(v00, v11);
+
+        return v00;
+    }
 
 }();

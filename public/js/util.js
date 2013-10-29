@@ -3,6 +3,9 @@
 util = function() {
     "use strict";
 
+    var τ = 2 * Math.PI;
+    var MIN_SLEEP_TIME = 25;  // amount of time a task waits before resuming (milliseconds)
+
     /**
      * Returns a random number between min (inclusive) and max (exclusive).
      */
@@ -51,6 +54,15 @@ util = function() {
     }
 
     /**
+     * Returns a promise that resolves to the specified value after a short nap.
+     */
+    function nap(value) {
+        var d = when.defer();
+        setTimeout(function() { d.resolve(value); }, MIN_SLEEP_TIME);
+        return d.promise;
+    }
+
+    /**
      * An object to perform logging when the browser supports it.
      */
     var log = {
@@ -70,6 +82,35 @@ util = function() {
         var y = w.innerHeight || d.clientHeight || b.clientHeight;
         return {width: x, height: y};
     }();
+
+    /**
+     * Returns a color style string for the specified RGBA values.
+     */
+    function asColorStyle(r, g, b, a) {
+        return "rgba(" + r + ", " + g + ", " + b + ", " + a + ")";
+    }
+
+    /**
+     * Produces a color style in a rainbow-like trefoil color space. Not quite HSV, but produces a nice
+     * spectrum. See http://krazydad.com/tutorials/makecolors.php.
+     *
+     * @param hue the hue rotation in the range [0, 1]
+     * @param a the alpha value in the range [0, 1]
+     * @returns {String} rgba style string
+     */
+    function asRainbowColorStyle(hue, a) {
+        // Map hue [0, 1] to radians [0, 5/6τ]. Don't allow a full rotation because that keeps hue == 0 and
+        // hue == 1 from mapping to the same color.
+        var rad = hue * τ * 5/6;
+        rad *= 0.75;  // increase frequency to 2/3 cycle per rad
+
+        var s = Math.sin(rad);
+        var c = Math.cos(rad);
+        var r = Math.floor(Math.max(0, -c) * 255);
+        var g = Math.floor(Math.max(s, 0) * 255);
+        var b = Math.floor(Math.max(c, 0, -s) * 255);
+        return asColorStyle(r, g, b, a);
+    }
 
     /**
      * Returns a promise for a JSON resource (URL) fetched via XHR. If the load fails, the promise rejects with an
@@ -114,11 +155,9 @@ util = function() {
     }
 
     /**
-     * Returns a d3 Albers conical projection (en.wikipedia.org/wiki/Albers_projection) that maps the bounding box
-     * defined by the lower left geographic coordinates (lng0, lat0) and upper right coordinates (lng1, lat1) onto
-     * the view port having (0, 0) as the upper left point and (width, height) as the lower right point.
+     * UNDONE
      */
-    function createFooProjection(lng0, lat0, lng1, lat1, view) {
+    function createOrthographicProjection(lng0, lat0, lng1, lat1, view) {
         // Construct a unit projection centered on the bounding box. NOTE: center calculation will not be correct
         // when the bounding box crosses the 180th meridian.
         var projection = d3.geo.orthographic()
@@ -136,20 +175,35 @@ util = function() {
         // Move the center to (0, 0) in pixel space.
         var t = [view.width / 2, view.height / 2];
 
-        return projection.scale(s).translate(t);
+        return projection.scale(s).translate(t)
+            .precision(0.1)  // smooths the sphere
+            .clipAngle(90)   // hides occluded side
+            .rotate([-130, -20]);
     }
 
     /**
-     * Returns an object that describes the location and size of the map displayed on screen.
+     * UNDONE
+     *
+     * Returns an object that describes the location and size of the projection on screen:
+     * {x:, y:, xBound:, yBound:, width:, height:, function contains(x, y)}
      */
-    function createDisplayBounds(lng0, lat0, lng1, lat1, projection) {
-        var upperLeft = projection([lng0, lat1]).map(Math.floor);
-        var lowerRight = projection([lng1, lat0]).map(Math.ceil);
+    function createDisplayBounds(projection) {
+        // UNDONE: bounds are crazy for conicConformal projection: [[-95669, -7850], [97109, 139]]
+        var bounds = d3.geo.path().projection(projection).bounds({type: "Sphere"});
+        var upperLeft = bounds[0];
+        var lowerRight = bounds[1];
+        var x = Math.floor(upperLeft[0]), xBound = Math.ceil(lowerRight[0]);
+        var y = Math.floor(upperLeft[1]), yBound = Math.ceil(lowerRight[1]);
         return {
-            x: upperLeft[0],
-            y: upperLeft[1],
-            width: lowerRight[0] - upperLeft[0] + 1,
-            height: lowerRight[1] - upperLeft[1] + 1
+            x: x,
+            y: y,
+            xBound: xBound,
+            yBound: yBound,
+            width: xBound - x + 1,
+            height: yBound - y + 1,
+            contains: function(px, py) {
+                return x <= px && px <= xBound && y <= py && py <= yBound;
+            }
         }
     }
 
@@ -160,11 +214,14 @@ util = function() {
         rand: rand,
         binarySearch: binarySearch,
         apply: apply,
+        nap: nap,
         log: log,
         view: view,
+        asColorStyle: asColorStyle,
+        asRainbowColorStyle: asRainbowColorStyle,
         loadJson: loadJson,
         createAlbersProjection: createAlbersProjection,
-        createFooProjection: createFooProjection,
+        createOrthographicProjection: createOrthographicProjection,
         createDisplayBounds: createDisplayBounds
     };
 

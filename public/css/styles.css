@@ -133,3 +133,41 @@ a:hover, a:focus {
     transition: color 25ms ease-in;
     -webkit-transition: color 25ms ease-in;
 }
+
+
+
+/*
+================================================================
+Experimental
+*/
+
+.coastline {
+    fill: none;
+/*
+    stroke: #585858;
+*/
+    stroke: #fff;
+    stroke-width: 0.5;
+}
+
+.graticule {
+    fill: none;
+    stroke: #404040;
+/*
+    stroke-opacity: .5;
+*/
+    stroke-width: 1;
+}
+
+.sphere-stroke {
+    fill: none;
+    stroke: #333;
+    stroke-width: 2;
+}
+
+.sphere-fill {
+/*
+    fill: url(#g741);
+*/
+    fill: #303030;
+}
