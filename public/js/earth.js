@@ -70,12 +70,20 @@
         log.time("building meshes");
         var path = d3.geo.path().projection(settings.projection);
         var boundaryLo = topojson.feature(topoLo, topoLo.objects.coastline);  // UNDONE: understand why mesh didn't work here
-        var boundaryHi = topojson.feature(topoHi, topoHi.objects.coastline);  // UNDONE: understand why mesh didn't work here
+        var lakesLo = topojson.feature(topoLo, topoLo.objects.lakes);
+        var riversLo = topojson.feature(topoLo, topoLo.objects.rivers);
+        var boundaryHi = topojson.feature(topoHi, topoHi.objects.coastline);
+        var lakesHi = topojson.feature(topoHi, topoHi.objects.lakes);
+        var riversHi = topojson.feature(topoHi, topoHi.objects.rivers);
         log.timeEnd("building meshes");
         return {
             path: path,
             boundaryLo: boundaryLo,
-            boundaryHi: boundaryHi
+            boundaryHi: boundaryHi,
+            lakesLo: lakesLo,
+            lakesHi: lakesHi,
+            riversLo: riversLo,
+            riversHi: riversHi
         };
     }
 
@@ -105,26 +113,63 @@
             .attr("d", path);
 
         var world = mapSvg.append("path").attr("class", "coastline").datum(mesh.boundaryHi).attr("d", path);
+//        var lakes = mapSvg.append("path").attr("class", "lakes").datum(mesh.lakesHi).attr("d", path);
+//        var rivers = mapSvg.append("path").attr("class", "rivers").datum(mesh.riversHi).attr("d", path);
 
         mapSvg.append("use")
             .attr("class", "sphere-stroke")
             .attr("xlink:href", "#sphere");
 
-//        var m = .25; // drag sensitivity
-//        d3.select(DISPLAY_ID).call(
-//            d3.behavior.drag()
-//                .origin(function () { var r = projection.rotate(); return {x: r[0] / m, y: -r[1] / m}; })
-//                .on("dragstart", function () {
-//                    world.datum(mesh.boundaryLo);
-//                })
-//                .on("drag", function () {
-//                    var rotate = projection.rotate();
-//                    projection.rotate([d3.event.x * m, -d3.event.y * m, rotate[2]]);
-//                    mapSvg.selectAll("path").attr("d", path);
-//                })
-//                .on("dragend", function () {
-//                    world.datum(mesh.boundaryHi).attr("d", path);
-//                }));
+        var zoom = d3.behavior.zoom()
+            .scale(projection.scale())
+            .scaleExtent([0, view.width * 2])
+            .on("zoomstart", function() {
+                resetDisplay(settings);
+                world.datum(mesh.boundaryLo);
+//                lakes.datum(mesh.lakesLo);
+//                rivers.datum(mesh.riversLo);
+            })
+            .on("zoom", function() {
+                projection.scale(d3.event.scale);
+                mapSvg.selectAll("path").attr("d", path);
+            })
+            .on("zoomend", function() {
+                world.datum(mesh.boundaryHi).attr("d", path);
+//                lakes.datum(mesh.lakesHi).attr("d", path);
+//                rivers.datum(mesh.riversHi).attr("d", path);
+                prepareDisplay(settings);
+            });
+
+        var m = .25; // drag sensitivity
+        d3.select(OVERLAY_CANVAS_ID).call(
+            d3.behavior.drag()
+                .origin(function() {
+                    var r = projection.rotate();
+                    return {
+                        x: r[0] / m,
+                        y: -r[1] / m
+                    };
+                })
+                .on("dragstart", function() {
+                    d3.event.sourceEvent.stopPropagation();
+                    resetDisplay(settings);
+                    world.datum(mesh.boundaryLo);
+//                    lakes.datum(mesh.lakesLo);
+//                    rivers.datum(mesh.riversLo);
+                })
+                .on("drag", function() {
+                    var rotate = projection.rotate();
+                    projection.rotate([d3.event.x * m, -d3.event.y * m, rotate[2]]);
+                    mapSvg.selectAll("path").attr("d", path);
+                })
+                .on("dragend", function() {
+                    world.datum(mesh.boundaryHi).attr("d", path);
+//                    lakes.datum(mesh.lakesHi).attr("d", path);
+//                    rivers.datum(mesh.riversHi).attr("d", path);
+                    prepareDisplay(settings);
+                }));
+
+        d3.select(DISPLAY_ID).call(zoom);
 
         log.timeEnd("rendering map");
     }
@@ -425,23 +470,25 @@
 
         (function batchInterpolate() {
             try {
-                var start = +new Date;
-                while (x < bounds.xBound) {
-                    columns[x] = interpolateColumn(x);
-                    x += 1;
-                    if ((+new Date - start) > MAX_TASK_TIME) {
-                        // Interpolation is taking too long. Schedule the next batch for later and yield.
-                        displayStatus("Interpolating: " + x + "/" + bounds.xBound);
-                        setTimeout(batchInterpolate, MIN_SLEEP_TIME);
-                        return;
+                if (settings.animate) {
+                    var start = +new Date;
+                    while (x < bounds.xBound) {
+                        columns[x] = interpolateColumn(x);
+                        x += 1;
+                        if ((+new Date - start) > MAX_TASK_TIME) {
+                            // Interpolation is taking too long. Schedule the next batch for later and yield.
+                            displayStatus("Interpolating: " + x + "/" + bounds.xBound);
+                            setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+                            return;
+                        }
                     }
+                    // var date = data[0].date.replace(":00+09:00", "");
+                    // d3.select(DISPLAY_ID).attr("data-date", displayData.date = date);
+                    // displayStatus(date + " JST");
+                    displayStatus("");
+                    d.resolve(createField(columns, bounds));
+                    log.timeEnd("interpolating field");
                 }
-                // var date = data[0].date.replace(":00+09:00", "");
-                // d3.select(DISPLAY_ID).attr("data-date", displayData.date = date);
-                // displayStatus(date + " JST");
-                displayStatus("");
-                d.resolve(createField(columns, bounds));
-                log.timeEnd("interpolating field");
             }
             catch (e) {
                 d.reject(e);
@@ -474,18 +521,20 @@
 
         (function batchDraw() {
             try {
-                var start = +new Date;
-                while (x < bounds.xBound) {
-                    drawColumn(x);
-                    x += 1;
-                    if ((+new Date - start) > MAX_TASK_TIME * 5) {
-                        // Drawing is taking too long. Schedule the next batch for later and yield.
-                        setTimeout(batchDraw, MIN_SLEEP_TIME);
-                        return;
+                if (settings.animate) {
+                    var start = +new Date;
+                    while (x < bounds.xBound) {
+                        drawColumn(x);
+                        x += 1;
+                        if ((+new Date - start) > MAX_TASK_TIME * 5) {
+                            // Drawing is taking too long. Schedule the next batch for later and yield.
+                            setTimeout(batchDraw, MIN_SLEEP_TIME);
+                            return;
+                        }
                     }
+                    d.resolve(true);
+                    log.timeEnd("overlay");
                 }
-                d.resolve(true);
-                log.timeEnd("overlay");
             }
             catch (e) {
                 d.reject(e);
@@ -583,6 +632,31 @@
         })();
     }
 
+    function clearCanvas(canvas) {
+        canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    }
+
+    function resetDisplay(settings) {
+        settings.animate = false;
+        clearCanvas(d3.select(FIELD_CANVAS_ID).node());
+        clearCanvas(d3.select(OVERLAY_CANVAS_ID).node());
+    }
+
+    function prepareDisplay(settings) {
+        settings.animate = true;
+        settings.displayBounds = util.createDisplayBounds(settings.projection);
+        log.debug(JSON.stringify(settings.displayBounds));
+        var maskTask        = when.all([settingsTask]).then(apply(renderMasks));
+        var fieldTask       = when.all([buildGridTask, settingsTask, maskTask]).then(apply(interpolateField));
+        var overlayTask     = when.all([settingsTask, fieldTask             ]).then(apply(overlay));
+        var animateTask     = when.all([settingsTask, fieldTask, overlayTask]).then(apply(animate));
+        when.all([
+            fieldTask,
+            overlayTask,
+            animateTask
+        ]).then(null, report);
+    }
+
     function report(e) {
         log.error(e);
         displayStatus(null, e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
@@ -596,9 +670,8 @@
     var meshTask        = when.all([topoLoTask, topoHiTask, settingsTask]).then(apply(buildMeshes));
     var renderTask      = when.all([settingsTask, meshTask              ]).then(apply(render));
     var buildGridTask   = when.all([dataTask                            ]).then(apply(buildGrid));
-    var fieldTask       = when.all([buildGridTask, settingsTask, renderTask]).then(apply(interpolateField));
-    var overlayTask     = when.all([settingsTask, fieldTask             ]).then(apply(overlay));
-    var animateTask     = when.all([settingsTask, fieldTask, overlayTask]).then(apply(animate));
+
+    var prepareTask = when.all([settingsTask]).then(apply(prepareDisplay));
 
     // Register a catch-all error handler to log errors rather then let them slip away into the ether.... Cleaner way?
     when.all([
@@ -609,9 +682,7 @@
         meshTask,
         renderTask,
         buildGridTask,
-        fieldTask,
-        overlayTask,
-        animateTask
+        prepareTask
     ]).then(null, report);
 
 })();

@@ -144,12 +144,12 @@ Experimental
 .coastline {
     fill: none;
     stroke: #fff;
-/*
-    stroke: #585858;
-*/
-/*
-    stroke-opacity: 0.7;
-*/
+    stroke-width: 0.8;
+}
+
+.lakes, .rivers {
+    fill: none;
+    stroke: #a0caff;
     stroke-width: 0.8;
 }
 
