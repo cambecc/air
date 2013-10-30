@@ -192,8 +192,8 @@ util = function() {
         var bounds = d3.geo.path().projection(projection).bounds({type: "Sphere"});
         var upperLeft = bounds[0];
         var lowerRight = bounds[1];
-        var x = Math.floor(upperLeft[0]), xBound = Math.ceil(lowerRight[0]);
-        var y = Math.floor(upperLeft[1]), yBound = Math.ceil(lowerRight[1]);
+        var x = Math.floor(Math.max(upperLeft[0], 0)), xBound = Math.ceil(Math.min(lowerRight[0], view.width - 1));
+        var y = Math.floor(Math.max(upperLeft[1], 0)), yBound = Math.ceil(Math.min(lowerRight[1], view.height - 1));
         return {
             x: x,
             y: y,

@@ -2,11 +2,14 @@
     "use strict";
 
     var NIL = -2;       // non-existent vector
+    var MAX_TASK_TIME = 100;  // amount of time before a task yields control (milliseconds)
+    var MIN_SLEEP_TIME = 25;  // amount of time a task waits before resuming (milliseconds)
 
     var DISPLAY_ID = "#display";
     var MAP_SVG_ID = "#map-svg";
     var FIELD_CANVAS_ID = "#field-canvas";
     var OVERLAY_CANVAS_ID = "#overlay-canvas";
+    var STATUS_ID = "#status";
 
     var log = util.log;
     var apply = util.apply;
@@ -50,9 +53,20 @@
         return settings;
     }
 
+    var bad = false;
+    function displayStatus(status, error) {
+        if (error) {
+            bad = true;  // errors are sticky--let's not overwrite error information if it occurs
+            d3.select(STATUS_ID).node().textContent = "⁂ " + error;
+        }
+        else if (!bad) {
+            d3.select(STATUS_ID).node().textContent = status ? "⁂ " + status : "";
+        }
+    }
+
     function buildMeshes(topoLo, topoHi, settings) {
         // UNDONE: Probably don't need this function anymore. Just need settings that will initialize the features...
-        // displayStatus("building meshes...");
+        displayStatus("building meshes...");
         log.time("building meshes");
         var path = d3.geo.path().projection(settings.projection);
         var boundaryLo = topojson.feature(topoLo, topoLo.objects.coastline);  // UNDONE: understand why mesh didn't work here
@@ -66,7 +80,7 @@
     }
 
     function renderMap(settings, mesh) {
-        // displayStatus("Rendering map...");
+        displayStatus("Rendering map...");
         log.time("rendering map");
 
         var projection = settings.projection;
@@ -80,7 +94,8 @@
             .attr("id", "sphere")
             .attr("d", path);
         mapSvg.append("use")
-            .attr("class", "sphere-fill")
+//            .attr("class", "sphere-fill")
+            .attr("fill", "url(#g741)")
             .attr("xlink:href", "#sphere");
 
         var graticule = d3.geo.graticule();
@@ -115,7 +130,7 @@
     }
 
     function renderMasks(settings) {
-        // displayStatus("Rendering masks...");
+        displayStatus("Rendering masks...");
         log.time("render masks");
 
         // To build the masks, re-render the map to a detached canvas and use the resulting pixel data array.
@@ -236,6 +251,8 @@
         var minLat = la2;
         var maxLat = la1;
 
+        var ll = [], ul = [], lr = [], ur = [];
+
         return {
             cell: function(lon, lat) {
                 // YUCK ---------------------------------------------------------
@@ -265,10 +282,10 @@
                     return row ? row[i] : null;
                 }
 
-                var ll = [fi, cj, get(cj, fi)];
-                var ul = [fi, fj, get(fj, fi)];
-                var lr = [ci, cj, get(cj, ci)];
-                var ur = [ci, fj, get(fj, ci)];
+                ll[0] = fi, ll[1] = cj, ll[2] = get(cj, fi);
+                ul[0] = fi, ul[1] = fj, ul[2] = get(fj, fi);
+                lr[0] = ci, lr[1] = cj, lr[2] = get(cj, ci);
+                ur[0] = ci, ur[1] = fj, ur[2] = get(fj, ci);
 
                 // log.debug(ll + " : " + lr + " : " + ul + " : " + ur);
 
@@ -297,10 +314,11 @@
 
         field.randomize = function(o) {
             var x, y;
+            var net = 0;  // UNDONE: fix
             do {
                 x = Math.round(util.rand(bounds.x, bounds.xBound + 1));
                 y = Math.round(util.rand(bounds.y, bounds.yBound + 1));
-            } while (field(x, y)[2] == NIL);
+            } while (field(x, y)[2] == NIL && net++ < 30);
             o.x = x;
             o.y = y;
             return o;
@@ -367,7 +385,9 @@
         var wu = [];
         var wv = [];
 
-        for (var x = bounds.x; x <= bounds.xBound; x += 1) {
+        var x = bounds.x;
+
+        function interpolateColumn(x) {
             var column = [];
             for (var y = bounds.y; y <= bounds.yBound; y += 1) {
                 if (displayMask(x, y)) {
@@ -400,33 +420,79 @@
                     column[y] = v;
                 }
             }
-            columns[x] = column;
+            return column;
         }
 
-        log.timeEnd("interpolating field");
+        (function batchInterpolate() {
+            try {
+                var start = +new Date;
+                while (x < bounds.xBound) {
+                    columns[x] = interpolateColumn(x);
+                    x += 1;
+                    if ((+new Date - start) > MAX_TASK_TIME) {
+                        // Interpolation is taking too long. Schedule the next batch for later and yield.
+                        displayStatus("Interpolating: " + x + "/" + bounds.xBound);
+                        setTimeout(batchInterpolate, MIN_SLEEP_TIME);
+                        return;
+                    }
+                }
+                // var date = data[0].date.replace(":00+09:00", "");
+                // d3.select(DISPLAY_ID).attr("data-date", displayData.date = date);
+                // displayStatus(date + " JST");
+                displayStatus("");
+                d.resolve(createField(columns, bounds));
+                log.timeEnd("interpolating field");
+            }
+            catch (e) {
+                d.reject(e);
+            }
+        })();
 
-        return d.resolve(createField(columns, bounds));
+        return d.promise;
     }
 
     function overlay(settings, field) {
+
+        var d = when.defer();
 
         var bounds = settings.displayBounds;
         var g = d3.select(OVERLAY_CANVAS_ID).node().getContext("2d");
 
         log.time("overlay");
-        for (var x = bounds.x; x <= bounds.xBound; x += 1) {
+        var x = bounds.x;
+        function drawColumn(x) {
             for (var y = bounds.y; y <= bounds.yBound; y += 1) {
                 var v = field(x, y);
                 var m = v[2];
                 if (m != NIL) {
-                    m = Math.min(m, 30);
-                    g.fillStyle = util.asRainbowColorStyle(m / 30, 0.3);
+                    m = Math.min(m, 25);
+                    g.fillStyle = util.asRainbowColorStyle(m / 25, 0.4);
                     g.fillRect(x, y, 1, 1);
                 }
             }
         }
 
-        log.timeEnd("overlay");
+        (function batchDraw() {
+            try {
+                var start = +new Date;
+                while (x < bounds.xBound) {
+                    drawColumn(x);
+                    x += 1;
+                    if ((+new Date - start) > MAX_TASK_TIME * 5) {
+                        // Drawing is taking too long. Schedule the next batch for later and yield.
+                        setTimeout(batchDraw, MIN_SLEEP_TIME);
+                        return;
+                    }
+                }
+                d.resolve(true);
+                log.timeEnd("overlay");
+            }
+            catch (e) {
+                d.reject(e);
+            }
+        })();
+
+        return d.promise;
     }
 
     function animate(settings, field) {
@@ -519,7 +585,7 @@
 
     function report(e) {
         log.error(e);
-        // displayStatus(null, e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
+        displayStatus(null, e.error ? e.error == 404 ? "No Data" : e.error + " " + e.message : e);
     }
 
     var topoLoTask      = util.loadJson(parameters.topography_lo);
@@ -532,7 +598,7 @@
     var buildGridTask   = when.all([dataTask                            ]).then(apply(buildGrid));
     var fieldTask       = when.all([buildGridTask, settingsTask, renderTask]).then(apply(interpolateField));
     var overlayTask     = when.all([settingsTask, fieldTask             ]).then(apply(overlay));
-    var animateTask     = when.all([settingsTask, fieldTask             ]).then(apply(animate));
+    var animateTask     = when.all([settingsTask, fieldTask, overlayTask]).then(apply(animate));
 
     // Register a catch-all error handler to log errors rather then let them slip away into the ether.... Cleaner way?
     when.all([
@@ -542,10 +608,10 @@
         settingsTask,
         meshTask,
         renderTask,
+        buildGridTask,
         fieldTask,
         overlayTask,
-        animateTask,
-        buildGridTask
+        animateTask
     ]).then(null, report);
 
 })();

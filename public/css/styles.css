@@ -12,7 +12,7 @@ html, body, div, span, h1, h2, h3, h4, h5, h6, p, a {
 }
 
 body {
-    background: #202020;
+    background: #000004;
     overflow-x: hidden;
     line-height: 0;
     color: #eee;
@@ -143,19 +143,20 @@ Experimental
 
 .coastline {
     fill: none;
+    stroke: #fff;
 /*
     stroke: #585858;
 */
-    stroke: #fff;
-    stroke-width: 0.5;
+/*
+    stroke-opacity: 0.7;
+*/
+    stroke-width: 0.8;
 }
 
 .graticule {
     fill: none;
-    stroke: #404040;
-/*
-    stroke-opacity: .5;
-*/
+    stroke: #505050;
+    stroke-opacity: 0.7;
     stroke-width: 1;
 }
 

@@ -459,7 +459,10 @@ mvi = function() {
         }
     }
 
-    return mvi;
+    var v00 = [];
+    var v01 = [];
+    var v10 = [];
+    var v11 = [];
 
     /**
      * UNDONE
@@ -472,20 +475,22 @@ mvi = function() {
             throw new Error("hrm: " + [x, y]);
         }
 
-        var v00 = [ll[2][0], ll[2][1]];
+        v00[0] = ll[2][0], v00[1] = ll[2][1];
         scaleVector(v00, (1 - x) * (1 - y));
-        var v01 = [lr[2][0], lr[2][1]];
+        v01[0] = lr[2][0], v01[1] = lr[2][1];
         scaleVector(v01, (x) * (1 - y));
-        var v10 = [ul[2][0], ul[2][1]];
+        v10[0] = ul[2][0], v10[1] = ul[2][1];
         scaleVector(v10, (1 - x) * (y));
-        var v11 = [ur[2][0], ur[2][1]];
+        v11[0] = ur[2][0], v11[1] = ur[2][1];
         scaleVector(v11, (x) * (y));
 
         addVectors(v00, v01);
         addVectors(v00, v10);
         addVectors(v00, v11);
 
-        return v00;
+        return [v00[0], v00[1]];
     }
+
+    return mvi;
 
 }();

@@ -14,8 +14,10 @@
         <div id="map">
             <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" version="1.1">
                 <defs>
-                    <radialGradient id="g741" gradientUnits="userSpaceOnUse" cx="50%" cy="50%" r="40%">
-                        <stop stop-color="#383838" offset="0"></stop><stop stop-color="#000" offset="1"></stop>
+                    <radialGradient id="g741" gradientUnits="objectBoundingBox" cx="50%" cy="49%" r="50%">
+                        <stop stop-color="#303030" offset="69%"></stop>
+                        <stop stop-color="#202020" offset="91%"></stop>
+                        <stop stop-color="#000" offset="96%"></stop>
                     </radialGradient>
                 </defs>
 
@@ -28,6 +30,7 @@
             <canvas id="overlay-canvas"></canvas>
         </div>
         <div id="details">
+            <h2 id="status">&nbsp;</h2>
             <h1 id="type">earth</h1>
 <!--
             <h1 id="type2">地球</h1>
@@ -39,6 +42,7 @@
     <script src="/js/d3.v3.js" charset="utf-8"></script>
 <!--
     <script src="/js/d3.geo.polyhedron.v0.js"></script>
+    <script src="http://d3js.org/d3.geo.projection.v0.min.js" charset="utf-8"></script>
 -->
     <script src="/js/topojson.v1.js" charset="utf-8"></script>
     <script src="/js/util.js" charset="utf-8"></script>
