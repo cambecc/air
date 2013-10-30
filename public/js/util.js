@@ -207,6 +207,36 @@ util = function() {
         }
     }
 
+    function distortion(projection) {
+        // gis.stackexchange.com/questions/5068/how-to-create-an-accurate-tissot-indicatrix
+        // www.jasondavies.com/maps/tissot
+
+        var r = Math.pow(10, -5.2);
+        // CONSIDER: potentially useful for avoiding array allocations??
+        // var px, py;
+        // var stream = projection.stream({ point: function(x, y) { px = x; py = y; } });
+
+        return function(λ, φ, x, y, ud, vd) {
+            var λ0 = λ > 0 ? λ - r : λ + r;
+            var φ0 = φ > 0 ? φ - r : φ + r;
+
+            var pλ = projection([λ0, φ]);
+            var pφ = projection([λ, φ0]);
+
+            if (!pλ || !pφ) {
+                return false;
+            }
+
+            var Δλ = λ - λ0;
+            var Δφ = φ - φ0;
+            ud[0] = (x - pλ[0]) / Δλ;
+            ud[1] = (pλ[1] - y) / Δλ;  // lat increases downward in pixel space
+            vd[0] = (x - pφ[0]) / Δφ;
+            vd[1] = (pφ[1] - y) / Δφ;  // lat increases downward in pixel space
+            return true;
+        }
+    }
+
     /**
      * Return exported members.
      */
@@ -222,7 +252,8 @@ util = function() {
         loadJson: loadJson,
         createAlbersProjection: createAlbersProjection,
         createOrthographicProjection: createOrthographicProjection,
-        createDisplayBounds: createDisplayBounds
+        createDisplayBounds: createDisplayBounds,
+        distortion: distortion
     };
 
 }();

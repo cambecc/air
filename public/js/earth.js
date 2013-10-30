@@ -298,6 +298,8 @@
 
         var ll = [], ul = [], lr = [], ur = [];
 
+        log.timeEnd("build grid");
+
         return {
             cell: function(lon, lat) {
                 // YUCK ---------------------------------------------------------
@@ -379,58 +381,15 @@
         var bounds = settings.displayBounds;
         var projection = settings.projection;
         var displayMask = masks.displayMask;
-        // var path = d3.geo.path().projection(settings.projection);
-
-        var cappath = d3.geo.path().projection(settings.projection);
-
-        var pointg = function() {
-            var uwa = 0;
-            var uwb = 0;
-            var vwa = 0;
-            var vwb = 0;
-            var i = 0;
-
-            return {
-                beginPath: function() {
-                    uwa = uwb = vwa = vwb = i = 0;
-                },
-                moveTo: function(x, y) {
-                },
-                lineTo: function(x, y) {
-                },
-                arc: function(x, y/*, radius, startAngle, endAngle, anticlockwise*/) {
-                    if (i === 0) {
-                        uwa = x;
-                        uwb = y;
-                        i++;
-                    }
-                    else {
-                        vwa = x;
-                        vwb = y;
-                    }
-                },
-                closePath: function() {
-                },
-                delta: function(wu, wv) {
-                    wu[0] = uwa;
-                    wu[1] = uwb;
-                    wv[0] = vwa;
-                    wv[1] = vwb;
-                }
-            };
-        }();
-
-        cappath.context(pointg);
 
         var columns = [];
         var point = [];
-        var testCoords = [];
-        var multipoint = { type: "MultiPoint", coordinates: testCoords };
 
-        var wu = [];
-        var wv = [];
+        var du = [];  // u component distortion vector
+        var dv = [];  // v component distortion vector
 
         var x = bounds.x;
+        var distortion = util.distortion(projection);
 
         function interpolateColumn(x) {
             var column = [];
@@ -438,34 +397,27 @@
                 if (displayMask(x, y)) {
                     point[0] = x, point[1] = y;
                     var coord = projection.invert(point);
+                    var λ = coord[0], φ = coord[1];
 
-                    var v = grid.cell(coord[0], coord[1]);
-                    if (!v) continue;  // UNDONE does this happen anymore?
-                    v[2] = Math.sqrt(v[0] * v[0] + v[1] * v[1]);
-                    v[1] = -v[1];  // y-axis grows down
+                    var wind = grid.cell(λ, φ);
+                    if (!wind) continue;  // UNDONE does this happen anymore?
 
-                    // Now adjust the wind vector for warp caused by projection...
-                    testCoords[0] = [coord[0] + 0.001, coord[1]];
-                    testCoords[1] = [coord[0], Math.max(coord[1] - 0.001, -90)];
-                    pointg.beginPath();
-                    cappath(multipoint);
-                    pointg.delta(wu, wv);
-                    wu[0] = (wu[0] - x) * 1000;
-                    wu[1] = (wu[1] - y) * 1000;
-                    wv[0] = (wv[0] - x) * 1000;
-                    wv[1] = (wv[1] - y) * 1000;
+                    distortion(λ, φ, x, y, du, dv);
 
-                    wu = mvi.scaleVector(wu, v[0]); // scale warped u by u component value.
-                    wv = mvi.scaleVector(wv, v[1]); // scale warped v by v component value.
+                    var u = wind[0], v = wind[1];
+                    du = mvi.scaleVector(du, u * 0.02); // scale warped u by u component value.
+                    dv = mvi.scaleVector(dv, v * 0.02); // scale warped v by v component value.
+                    wind[0] = 0; wind[1] = 0;
+                    wind = mvi.addVectors(wind, du);
+                    wind = mvi.addVectors(wind, dv);
 
-                    v = mvi.addVectors(v, wu);
-                    v = mvi.addVectors(v, wv);
-                    v = mvi.scaleVector(v, 0.02);
+                    wind[1] = -wind[1];  // reverse v component because y-axis grows down in pixel space
+                    wind[2] = Math.sqrt(u * u + v * v);  // pre-calculate magnitude
 
-                    column[y] = v;
+                    column[y] = wind;
                 }
             }
-            return column;
+            columns[x] = column;
         }
 
         (function batchInterpolate() {
@@ -473,7 +425,7 @@
                 if (settings.animate) {
                     var start = +new Date;
                     while (x < bounds.xBound) {
-                        columns[x] = interpolateColumn(x);
+                        interpolateColumn(x);
                         x += 1;
                         if ((+new Date - start) > MAX_TASK_TIME) {
                             // Interpolation is taking too long. Schedule the next batch for later and yield.
@@ -505,16 +457,18 @@
         var bounds = settings.displayBounds;
         var g = d3.select(OVERLAY_CANVAS_ID).node().getContext("2d");
 
+        var BLOCK = 1;  // block size of an overlay pixel
+
         log.time("overlay");
         var x = bounds.x;
         function drawColumn(x) {
-            for (var y = bounds.y; y <= bounds.yBound; y += 1) {
+            for (var y = bounds.y; y <= bounds.yBound; y += BLOCK) {
                 var v = field(x, y);
                 var m = v[2];
                 if (m != NIL) {
                     m = Math.min(m, 25);
                     g.fillStyle = util.asRainbowColorStyle(m / 25, 0.4);
-                    g.fillRect(x, y, 1, 1);
+                    g.fillRect(x, y, BLOCK, BLOCK);
                 }
             }
         }
@@ -525,7 +479,7 @@
                     var start = +new Date;
                     while (x < bounds.xBound) {
                         drawColumn(x);
-                        x += 1;
+                        x += BLOCK;
                         if ((+new Date - start) > MAX_TASK_TIME * 5) {
                             // Drawing is taking too long. Schedule the next batch for later and yield.
                             setTimeout(batchDraw, MIN_SLEEP_TIME);
