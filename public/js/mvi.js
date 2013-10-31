@@ -459,36 +459,20 @@ mvi = function() {
         }
     }
 
-    var v00 = [];
-    var v01 = [];
-    var v10 = [];
-    var v11 = [];
-
-    /**
-     * UNDONE
-     */
+    // UNDONE
     function bilinear(x, y, ll, lr, ul, ur) {
         // f(0, 0)(1 - x)(1 - y) + f(1, 0)x(1-y) + f(0, 1)(1 - x)y + f(1, 1)xy
-
-        // console.log([x, y]);
         if (x < 0 || 1 < x || y < 0 || 1 < y) {
-            throw new Error("hrm: " + [x, y]);
+            throw new Error("expected unit square bilinear: " + [x, y]);
         }
-
-        v00[0] = ll[2][0], v00[1] = ll[2][1];
-        scaleVector(v00, (1 - x) * (1 - y));
-        v01[0] = lr[2][0], v01[1] = lr[2][1];
-        scaleVector(v01, (x) * (1 - y));
-        v10[0] = ul[2][0], v10[1] = ul[2][1];
-        scaleVector(v10, (1 - x) * (y));
-        v11[0] = ur[2][0], v11[1] = ur[2][1];
-        scaleVector(v11, (x) * (y));
-
-        addVectors(v00, v01);
-        addVectors(v00, v10);
-        addVectors(v00, v11);
-
-        return [v00[0], v00[1]];
+        var s = (1 - x) * (1 - y);
+        var t = x * (1 - y);
+        var u = (1 - x) * y;
+        var v = x * y;
+        return [
+            ll[0] * s + lr[0] * t + ul[0] * u + ur[0] * v,
+            ll[1] * s + lr[1] * t + ul[1] * u + ur[1] * v
+        ];
     }
 
     return mvi;

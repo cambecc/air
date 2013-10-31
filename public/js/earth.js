@@ -223,15 +223,6 @@
         }
     }
 
-    /**
-     * Draws the map on screen and returns a promise for the rendered field and display masks.
-     */
-    function render(settings, mesh) {
-        return when(renderMap(settings, mesh))
-            .then(util.nap)  // temporarily yield control back to the browser to maintain responsiveness
-            .then(renderMasks.bind(null, settings));
-    }
-
     function floorDiv(a, n) {
         return a - n * Math.floor(a / n);
     }
@@ -280,7 +271,7 @@
             var lat = la1 - (j * dy);
             for (var i = 0; i < nx; i++, p++) {
                 var lon = antiMeridianNormal(lo1 + (i * dx));
-                row[i] = [lon, lat, [ua[p], va[p]]];
+                row[i] = [lon, lat, [ua[p], va[p]]];  // UNDONE: change to [lon, lat, ua[p], va[p]]? -- but affects bilinear
             }
             grid[j] = row;
         }
@@ -340,9 +331,11 @@
                     return null;    // UNDONE does this happen anymore?
                 }
 
-                var v = mvi.bilinear((lon - normalize(ll[2][0])) / dx, (lat - ll[2][1]) / dy, ll[2], lr[2], ul[2], ur[2]);
-                return v;
+                var x = (lon - normalize(ll[2][0])) / dx;
+                var y = (lat - ll[2][1]) / dy;
+                return mvi.bilinear(x, y, ll[2][2], lr[2][2], ul[2][2], ur[2][2]);
             }
+            // pointRows: grid
         }
     }
 
@@ -385,36 +378,67 @@
         var columns = [];
         var point = [];
 
-        var du = [];  // u component distortion vector
+        var distortion = util.distortion(projection);
         var dv = [];  // v component distortion vector
 
-        var x = bounds.x;
-        var distortion = util.distortion(projection);
+        function distort(λ, φ, x, y, wind) {
+            var u = wind[0], v = wind[1];
+            var du = wind;
 
+            if (!distortion(λ, φ, x, y, du, dv)) {
+                throw new Error("whoops");
+            }
+
+            wind = mvi.addVectors(
+                mvi.scaleVector(du, u * 0.02),  // scale warped u by u component value.
+                mvi.scaleVector(dv, v * 0.02)); // scale warped v by v component value.
+
+            wind[1] = -wind[1];  // reverse v component because y-axis grows down in pixel space
+            wind[2] = Math.sqrt(u * u + v * v);  // remember magnitude before distorting vector
+
+            return wind;
+        }
+
+//        // First, pre-populate the columns with all visible grid points -- no need to interpolate them
+//        var sample;
+//        var stream = projection.stream({
+//            point: function(x, y) {  // method invoked only for non-clipped x and y screen positions
+//                var xr = Math.round(x);
+//                var yr = Math.round(y);
+//                if (displayMask(x, y)) {
+//                    var column = columns[xr];
+//                    if (!column) {
+//                        column = columns[xr] = [];
+//                    }
+//                    var wind = [sample[2][0], sample[2][1]];
+//                    column[yr] = distort(sample[0], sample[1], x, y, wind);
+//                }
+//            }
+//        });
+//
+//        grid.pointRows.forEach(function(row) {
+//            for (var i = 0; i < row.length; i++) {
+//                sample = row[i];
+//                stream.point(sample[0], sample[1]);
+//            }
+//        });
+
+        var x = bounds.x;
         function interpolateColumn(x) {
-            var column = [];
+            var column = columns[x];
+            if (!column) {
+                column = columns[x] = [];
+            }
             for (var y = bounds.y; y <= bounds.yBound; y += 1) {
                 if (displayMask(x, y)) {
                     point[0] = x, point[1] = y;
                     var coord = projection.invert(point);
                     var λ = coord[0], φ = coord[1];
-
                     var wind = grid.cell(λ, φ);
-                    if (!wind) continue;  // UNDONE does this happen anymore?
-
-                    distortion(λ, φ, x, y, du, dv);
-
-                    var u = wind[0], v = wind[1];
-                    du = mvi.scaleVector(du, u * 0.02); // scale warped u by u component value.
-                    dv = mvi.scaleVector(dv, v * 0.02); // scale warped v by v component value.
-                    wind[0] = 0; wind[1] = 0;
-                    wind = mvi.addVectors(wind, du);
-                    wind = mvi.addVectors(wind, dv);
-
-                    wind[1] = -wind[1];  // reverse v component because y-axis grows down in pixel space
-                    wind[2] = Math.sqrt(u * u + v * v);  // pre-calculate magnitude
-
-                    column[y] = wind;
+                    if (!wind) {
+                        continue;  // UNDONE does this happen anymore?
+                    }
+                    column[y] = distort(λ, φ, x, y, wind);
                 }
             }
             columns[x] = column;
@@ -427,7 +451,7 @@
                     while (x < bounds.xBound) {
                         interpolateColumn(x);
                         x += 1;
-                        if ((+new Date - start) > MAX_TASK_TIME) {
+                        if ((+new Date - start) > MAX_TASK_TIME * 100) {  // UNDONE: reduce
                             // Interpolation is taking too long. Schedule the next batch for later and yield.
                             displayStatus("Interpolating: " + x + "/" + bounds.xBound);
                             setTimeout(batchInterpolate, MIN_SLEEP_TIME);
@@ -499,8 +523,6 @@
     }
 
     function animate(settings, field) {
-
-        log.debug("here");
 
         var bounds = settings.displayBounds;
         var buckets = settings.styles.map(function() { return []; });
@@ -597,13 +619,15 @@
     }
 
     function prepareDisplay(settings) {
+        // UNDONE: make this better -- don't like the "settings" object...
         settings.animate = true;
         settings.displayBounds = util.createDisplayBounds(settings.projection);
-        log.debug(JSON.stringify(settings.displayBounds));
-        var maskTask        = when.all([settingsTask]).then(apply(renderMasks));
+
+        var maskTask        = when.all([settingsTask                         ]).then(apply(renderMasks));
         var fieldTask       = when.all([buildGridTask, settingsTask, maskTask]).then(apply(interpolateField));
-        var overlayTask     = when.all([settingsTask, fieldTask             ]).then(apply(overlay));
-        var animateTask     = when.all([settingsTask, fieldTask, overlayTask]).then(apply(animate));
+        var overlayTask     = when.all([settingsTask, fieldTask              ]).then(apply(overlay));
+        var animateTask     = when.all([settingsTask, fieldTask, overlayTask ]).then(apply(animate));
+
         when.all([
             fieldTask,
             overlayTask,
@@ -622,10 +646,9 @@
     var initTask        = when.all([true                                ]).then(apply(init));
     var settingsTask    = when.all([topoLoTask                          ]).then(apply(createSettings));
     var meshTask        = when.all([topoLoTask, topoHiTask, settingsTask]).then(apply(buildMeshes));
-    var renderTask      = when.all([settingsTask, meshTask              ]).then(apply(render));
+    var renderMapTask   = when.all([settingsTask, meshTask              ]).then(apply(renderMap));
     var buildGridTask   = when.all([dataTask                            ]).then(apply(buildGrid));
-
-    var prepareTask = when.all([settingsTask]).then(apply(prepareDisplay));
+    var prepareTask     = when.all([settingsTask                        ]).then(apply(prepareDisplay));
 
     // Register a catch-all error handler to log errors rather then let them slip away into the ether.... Cleaner way?
     when.all([
@@ -634,7 +657,7 @@
         initTask,
         settingsTask,
         meshTask,
-        renderTask,
+        renderMapTask,
         buildGridTask,
         prepareTask
     ]).then(null, report);
