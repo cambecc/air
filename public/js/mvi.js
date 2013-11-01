@@ -460,18 +460,16 @@ mvi = function() {
     }
 
     // UNDONE
-    function bilinear(x, y, ll, lr, ul, ur) {
-        // f(0, 0)(1 - x)(1 - y) + f(1, 0)x(1-y) + f(0, 1)(1 - x)y + f(1, 1)xy
-        if (x < 0 || 1 < x || y < 0 || 1 < y) {
-            throw new Error("expected unit square bilinear: " + [x, y]);
-        }
+    function bilinear(x, y, g00, g10, g01, g11) {
+        // g(0, 0)(1 - x)(1 - y) + g(1, 0)x(1-y) + g(0, 1)(1 - x)y + g(1, 1)xy
+
         var s = (1 - x) * (1 - y);
         var t = x * (1 - y);
         var u = (1 - x) * y;
         var v = x * y;
         return [
-            ll[0] * s + lr[0] * t + ul[0] * u + ur[0] * v,
-            ll[1] * s + lr[1] * t + ul[1] * u + ur[1] * v
+            g00[0] * s + g10[0] * t + g01[0] * u + g11[0] * v,
+            g00[1] * s + g10[1] * t + g01[1] * u + g11[1] * v
         ];
     }
 

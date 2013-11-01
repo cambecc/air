@@ -37,7 +37,7 @@
             displayBounds: bounds,
             particleCount: Math.round(bounds.width / 0.14),
             maxParticleAge: 40,  // max number of frames a particle is drawn before regeneration
-            velocityScale: +(bounds.height / 700).toFixed(3),  // particle speed as number of pixels per unit vector
+            velocityScale: bounds.height / 39000,  // particle speed as number of pixels per unit vector
             fadeFillStyle: isFF ? "rgba(0, 0, 0, 0.95)" : "rgba(0, 0, 0, 0.97)",  // FF Mac alpha behaves differently
             frameRate: 40,  // desired milliseconds per frame
             animate: true,
@@ -174,169 +174,91 @@
         log.timeEnd("rendering map");
     }
 
-    function renderMasks(settings) {
-        displayStatus("Rendering masks...");
-        log.time("render masks");
-
-        // To build the masks, re-render the map to a detached canvas and use the resulting pixel data array.
-        // The red color channel defines the field mask, and the green color channel defines the display mask.
-
-        var canvas = document.createElement("canvas");  // create detached canvas
-        d3.select(canvas).attr("width", view.width).attr("height", view.height);
-        var g = canvas.getContext("2d");
-        var path = d3.geo.path().projection(settings.projection).context(g);  // create a path for the canvas
-
-        path({type: "Sphere"});  // define the border
-
-        // draw a fat border in red
-        g.strokeStyle = util.asColorStyle(255, 0, 0, 1);
-        g.lineWidth = settings.fieldMaskWidth;
-        g.stroke();
-
-        // fill the interior with both red and green
-        g.fillStyle = util.asColorStyle(255, 255, 0, 1);
-        g.fill();
-
-        // draw a small border in red, slightly shrinking the display mask so we don't draw particles directly
-        // on top of the visible SVG border
-        g.strokeStyle = util.asColorStyle(255, 0, 0, 1);
-        g.lineWidth = 2;
-        g.stroke();
-
-        // d3.select(DISPLAY_ID).node().appendChild(canvas);  // uncomment to make mask visible for debugging
-
-        var width = canvas.width;
-        var data = g.getImageData(0, 0, canvas.width, canvas.height).data;
-
-        log.timeEnd("render masks");
-
-        // data array layout: [r, g, b, a, r, g, b, a, ...]
-        return {
-            fieldMask: function(x, y) {
-                var i = (y * width + x) * 4;  // red channel is field mask
-                return data[i] > 0;
-            },
-            displayMask: function(x, y) {
-                var i = (y * width + x) * 4 + 1;  // green channel is display mask
-                return data[i] > 0;
-            }
-        }
-    }
-
     function floorDiv(a, n) {
         return a - n * Math.floor(a / n);
     }
 
-    // maps x to the longitudinal range starting at the prime meridian: [0, 360)
-    function primeMeridianNormal(x) {
-        return x - 360 * Math.floor(x / 360);
-    }
-
-    // maps x to the longitudinal range starting at the anti-meridian: [-180, 180)
-    function antiMeridianNormal(x) {
-        return x - 360 * Math.floor((x + 180) / 360);
-    }
-
     function buildGrid(data) {
         log.time("build grid");
-        var d = when.defer();
 
-        if (data.length < 2) {
-            return d.reject("Insufficient data in response");
+        // http://www.nco.ncep.noaa.gov/pmb/docs/grib2/
+        // http://mst.nerc.ac.uk/wind_vect_convs.html
+
+        // UNDONE: surface types and values:
+        // "surface1Type":103,
+        // "surface1TypeName":"Specified height level above ground",
+        // "surface1Value":10.0,
+
+        var uRecord = null, vRecord = null;
+        data.forEach(function(record) {
+            switch (record.header.parameterNumber) {
+                case 2: uRecord = record; break; // U-component_of_wind
+                case 3: vRecord = record; break; // V-component_of_wind
+            }
+        });
+        if (!uRecord || !vRecord) {
+            return when.reject("Failed to find both u,v component records");
         }
 
-        // Build array of vectors
-        var record0 = data[0];
-        var record1 = data[1];
-        var header = record0.header;
-        var nx = header.nx;    // 144 divisions lon
-        var ny = header.ny;    // 73 divisions lat
-        var lo1 = header.lo1;  // 0.0
-        var lo2 = header.lo2;  // 357.5
-        var la1 = header.la1;  // 90.0
-        var la2 = header.la2;  // -90.0
-        var dx = header.dx;    // 2.5 deg lon
-        var dy = header.dy;    // 2.5 deg lat
-        var ua = record0.data;
-        var va = record1.data;
-        if (ua.length != va.length) {
+        var header = uRecord.header;
+        var λ0 = header.lo1, φ0 = header.la1;  // the grid's origin (e.g., 0.0E, 90.0N)
+        var Δλ = header.dx, Δφ = header.dy;    // distance between grid points (e.g., 2.5 deg lon, 2.5 deg lat)
+        var ni = header.nx, nj = header.ny;    // number of grid points W-E and N-S (e.g., 144 x 73)
+        var uData = uRecord.data, vData = vRecord.data;
+        if (uData.length != vData.length) {
             return d.reject("Mismatched data point lengths");
         }
 
-        // scan mode 0 assumed: http://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_table3-4.shtml
-        var grid = [];
-        var p = 0;
-        for (var j = 0; j < ny; j++) {
+        // Scan mode 0 assumed. Longitude increases from λ0, and latitude decreases from φ0.
+        // http://www.nco.ncep.noaa.gov/pmb/docs/grib2/grib2_table3-4.shtml
+        var grid = [], p = 0;
+        var isContinuous = Math.floor(ni * Δλ) >= 360;
+        for (var j = 0; j < nj; j++) {
             var row = [];
-            var lat = la1 - (j * dy);
-            for (var i = 0; i < nx; i++, p++) {
-                var lon = antiMeridianNormal(lo1 + (i * dx));
-                row[i] = [lon, lat, [ua[p], va[p]]];  // UNDONE: change to [lon, lat, ua[p], va[p]]? -- but affects bilinear
+            for (var i = 0; i < ni; i++, p++) {
+                row[i] = [uData[p], vData[p]];
+            }
+            if (isContinuous) {
+                // For wrapped grids, duplicate first column as last column to simplify interpolation logic
+                row.push(row[0]);
             }
             grid[j] = row;
         }
 
-        var normalize = lo1 < lo2 ? primeMeridianNormal : antiMeridianNormal;
-        var isContinuous = (dx * nx) == 360;  // UNDONE: comparison valid?
-
-        var minLon = normalize(lo1);
-        var maxLon = normalize(lo2);
-        if (minLon > maxLon) {
-            throw new Error("unexpected...");
-        }
-        var minLat = la2;
-        var maxLat = la1;
-
-        var ll = [], ul = [], lr = [], ur = [];
-
         log.timeEnd("build grid");
 
-        return {
-            cell: function(lon, lat) {
-                // YUCK ---------------------------------------------------------
-                lon = normalize(lon);
-                var i = (lon - minLon) / dx;
-                var j = (maxLat - lat) / dy;
+        return function(λ, φ) {
+            var i = floorDiv(λ - λ0, 360) / Δλ;  // calculate longitude index in range [0, 360)
+            var j = (φ0 - φ) / Δφ;              // calculate latitude index in direction +90 to -90
 
-                var fi = Math.floor(i);
-                if (fi < 0 || nx <= fi) {
-                    fi = isContinuous ? floorDiv(fi, nx) : NaN;
-                }
-                var ci = Math.ceil(i);
-                if (ci < 0 || nx <= ci) {
-                    ci = isContinuous ? floorDiv(ci, nx) : NaN;
-                }
-                var fj = Math.floor(j);
-                if (fj < 0 || ny <= fj) {
-                    fj = NaN;
-                }
-                var cj = Math.ceil(j);
-                if (cj < 0 || ny <= cj) {
-                    cj = NaN;
-                }
+            //         1      2           After converting λ and φ to fractional grid indexes i and j, we find the
+            //        fi  i   ci          four points "G" that enclose i and j. These points are at the four corners
+            //         | =1.4 |           specified by the floor and ceiling of i and j. For example, given i = 1.4
+            //      ---G--|---G--- fj 8   and j = 8.3, the four surrounding grid points are (1, 8), (2, 8), (1, 9)
+            //    j ___|_ .   |           and (2, 9).
+            //  =8.3   |      |
+            //      ---G------G--- cj 9   Note that for wrapped grids, the first column is duplicated as the last
+            //         |      |           column, so the index ci can be used without taking a modulo.
 
-                function get(j, i) {
-                    var row = grid[j];
-                    return row ? row[i] : null;
+            var fi = Math.floor(i), ci = fi + 1;
+            var fj = Math.floor(j), cj = fj + 1;
+
+            var row;
+            if (row = grid[fj]) {
+                var g00 = row[fi];
+                var g10 = row[ci];
+                if (g00 && g10 && (row = grid[cj])) {
+                    var g01 = row[fi];
+                    var g11 = row[ci];
+                    if (g01 && g11) {
+                        // All four points found, so use bilinear interpolation to calculate the wind vector.
+                        return mvi.bilinear(i - fi, j - fj, g00, g10, g01, g11);
+                    }
                 }
-
-                ll[0] = fi, ll[1] = cj, ll[2] = get(cj, fi);
-                ul[0] = fi, ul[1] = fj, ul[2] = get(fj, fi);
-                lr[0] = ci, lr[1] = cj, lr[2] = get(cj, ci);
-                ur[0] = ci, ur[1] = fj, ur[2] = get(fj, ci);
-
-                // log.debug(ll + " : " + lr + " : " + ul + " : " + ur);
-
-                if (!ll[2] || !ul[2] || !lr[2] || !ur[2]) {
-                    return null;    // UNDONE does this happen anymore?
-                }
-
-                var x = (lon - normalize(ll[2][0])) / dx;
-                var y = (lat - ll[2][1]) / dy;
-                return mvi.bilinear(x, y, ll[2][2], lr[2][2], ul[2][2], ur[2][2]);
             }
-            // pointRows: grid
-        }
+            // log.debug("cannot interpolate: " + λ + "," + φ + ": " + fi + " " + ci + " " + fj + " " + cj);
+            return null;
+        };
     }
 
     function createField(columns, bounds) {
@@ -367,78 +289,52 @@
         return field;
     }
 
-    function interpolateField(grid, settings, masks) {
+    function interpolateField(grid, settings) {
         log.time("interpolating field");
         var d = when.defer();
 
-        var bounds = settings.displayBounds;
         var projection = settings.projection;
-        var displayMask = masks.displayMask;
-
-        var columns = [];
-        var point = [];
-
         var distortion = util.distortion(projection);
-        var dv = [];  // v component distortion vector
+        var dv = [];
+        var velocityScale = settings.velocityScale;
 
-        function distort(λ, φ, x, y, wind) {
-            var u = wind[0], v = wind[1];
+        /**
+         * Calculate distortion of the wind vector caused by the shape of the projection at point (x, y). The wind
+         * vector is modified in place and returned by this function.
+         */
+        function distort(x, y, λ, φ, wind) {
+            var u = wind[0], us = u * velocityScale;
+            var v = wind[1], vs = v * velocityScale;
             var du = wind;
 
             if (!distortion(λ, φ, x, y, du, dv)) {
                 throw new Error("whoops");
             }
 
-            wind = mvi.addVectors(
-                mvi.scaleVector(du, u * 0.02),  // scale warped u by u component value.
-                mvi.scaleVector(dv, v * 0.02)); // scale warped v by v component value.
-
-            wind[1] = -wind[1];  // reverse v component because y-axis grows down in pixel space
-            wind[2] = Math.sqrt(u * u + v * v);  // remember magnitude before distorting vector
+            // Scale distortion vectors by u and v, then add. Reverse v component because y-axis grows down.
+            wind[0] = du[0] * us + dv[0] * vs;
+            wind[1] = -(du[1] * us + dv[1] * vs);
+            wind[2] = Math.sqrt(u * u + v * v);  // calculate the original wind magnitude
 
             return wind;
         }
 
-//        // First, pre-populate the columns with all visible grid points -- no need to interpolate them
-//        var sample;
-//        var stream = projection.stream({
-//            point: function(x, y) {  // method invoked only for non-clipped x and y screen positions
-//                var xr = Math.round(x);
-//                var yr = Math.round(y);
-//                if (displayMask(x, y)) {
-//                    var column = columns[xr];
-//                    if (!column) {
-//                        column = columns[xr] = [];
-//                    }
-//                    var wind = [sample[2][0], sample[2][1]];
-//                    column[yr] = distort(sample[0], sample[1], x, y, wind);
-//                }
-//            }
-//        });
-//
-//        grid.pointRows.forEach(function(row) {
-//            for (var i = 0; i < row.length; i++) {
-//                sample = row[i];
-//                stream.point(sample[0], sample[1]);
-//            }
-//        });
-
+        var bounds = settings.displayBounds;
+        var columns = [];
+        var point = [];
         var x = bounds.x;
         function interpolateColumn(x) {
-            var column = columns[x];
-            if (!column) {
-                column = columns[x] = [];
-            }
+            var column = [];
             for (var y = bounds.y; y <= bounds.yBound; y += 1) {
-                if (displayMask(x, y)) {
-                    point[0] = x, point[1] = y;
-                    var coord = projection.invert(point);
-                    var λ = coord[0], φ = coord[1];
-                    var wind = grid.cell(λ, φ);
+                point[0] = x, point[1] = y;
+                var coord = projection.invert(point);
+                var λ = coord[0], φ = coord[1];
+                if (!isNaN(λ)) {
+                    var wind = grid(λ, φ);
                     if (!wind) {
-                        continue;  // UNDONE does this happen anymore?
+                        continue;
                     }
-                    column[y] = distort(λ, φ, x, y, wind);
+                    column[y] = distort(x, y, λ, φ, wind);
                 }
             }
             columns[x] = column;
@@ -451,7 +347,7 @@
                     while (x < bounds.xBound) {
                         interpolateColumn(x);
                         x += 1;
-                        if ((+new Date - start) > MAX_TASK_TIME * 100) {  // UNDONE: reduce
+                        if ((+new Date - start) > MAX_TASK_TIME) {
                             // Interpolation is taking too long. Schedule the next batch for later and yield.
                             displayStatus("Interpolating: " + x + "/" + bounds.xBound);
                             setTimeout(batchInterpolate, MIN_SLEEP_TIME);
@@ -623,8 +519,7 @@
         settings.animate = true;
         settings.displayBounds = util.createDisplayBounds(settings.projection);
 
-        var maskTask        = when.all([settingsTask                         ]).then(apply(renderMasks));
-        var fieldTask       = when.all([buildGridTask, settingsTask, maskTask]).then(apply(interpolateField));
+        var fieldTask       = when.all([buildGridTask, settingsTask         ]).then(apply(interpolateField));
         var overlayTask     = when.all([settingsTask, fieldTask              ]).then(apply(overlay));
         var animateTask     = when.all([settingsTask, fieldTask, overlayTask ]).then(apply(animate));
 
