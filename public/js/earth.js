@@ -175,6 +175,7 @@
     }
 
     function floorDiv(a, n) {
+        // floored division: http://en.wikipedia.org/wiki/Modulo_operation
         return a - n * Math.floor(a / n);
     }
 
@@ -228,14 +229,14 @@
         log.timeEnd("build grid");
 
         return function(λ, φ) {
-            var i = floorDiv(λ - λ0, 360) / Δλ;  // calculate longitude index in range [0, 360)
+            var i = floorDiv(λ - λ0, 360) / Δλ;  // calculate longitude index in wrapped range [0, 360)
             var j = (φ0 - φ) / Δφ;              // calculate latitude index in direction +90 to -90
 
             //         1      2           After converting λ and φ to fractional grid indexes i and j, we find the
-            //        fi  i   ci          four points "G" that enclose i and j. These points are at the four corners
-            //         | =1.4 |           specified by the floor and ceiling of i and j. For example, given i = 1.4
-            //      ---G--|---G--- fj 8   and j = 8.3, the four surrounding grid points are (1, 8), (2, 8), (1, 9)
-            //    j ___|_ .   |           and (2, 9).
+            //        fi  i   ci          four points "G" that enclose point (i, j). These points are at the four
+            //         | =1.4 |           corners specified by the floor and ceiling of i and j. For example, given
+            //      ---G--|---G--- fj 8   i = 1.4 and j = 8.3, the four surrounding grid points are (1, 8), (2, 8),
+            //    j ___|_ .   |           (1, 9) and (2, 9).
             //  =8.3   |      |
             //      ---G------G--- cj 9   Note that for wrapped grids, the first column is duplicated as the last
             //         |      |           column, so the index ci can be used without taking a modulo.
@@ -289,6 +290,8 @@
         return field;
     }
 
+    var BLOCK = 1;  // block size of field and overlay pixels
+
     function interpolateField(grid, settings) {
         log.time("interpolating field");
         var d = when.defer();
@@ -325,7 +328,7 @@
         var x = bounds.x;
         function interpolateColumn(x) {
             var column = [];
-            for (var y = bounds.y; y <= bounds.yBound; y += 1) {
+            for (var y = bounds.y; y <= bounds.yBound; y += BLOCK) {
                 point[0] = x, point[1] = y;
                 var coord = projection.invert(point);
                 var λ = coord[0], φ = coord[1];
@@ -334,10 +337,10 @@
                     if (!wind) {
                         continue;
                     }
-                    column[y] = distort(x, y, λ, φ, wind);
+                    /*column[y + 1] =*/ column[y] = distort(x, y, λ, φ, wind);
                 }
             }
-            columns[x] = column;
+            /*columns[x + 1] =*/ columns[x] = column;
         }
 
         (function batchInterpolate() {
@@ -346,7 +349,7 @@
                     var start = +new Date;
                     while (x < bounds.xBound) {
                         interpolateColumn(x);
-                        x += 1;
+                        x += BLOCK;
                         if ((+new Date - start) > MAX_TASK_TIME) {
                             // Interpolation is taking too long. Schedule the next batch for later and yield.
                             displayStatus("Interpolating: " + x + "/" + bounds.xBound);
@@ -376,8 +379,6 @@
 
         var bounds = settings.displayBounds;
         var g = d3.select(OVERLAY_CANVAS_ID).node().getContext("2d");
-
-        var BLOCK = 1;  // block size of an overlay pixel
 
         log.time("overlay");
         var x = bounds.x;
