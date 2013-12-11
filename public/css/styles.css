@@ -74,9 +74,9 @@ body {
 
 #notice {
     position: absolute;
-    top: 5%;
-    right: 2%;
-    font-size: 1.0em;
+    bottom: 4%;
+    right: 1%;
+    font-size: 1.25rem;
 }
 
 #about {
