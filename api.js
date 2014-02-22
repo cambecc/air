@@ -68,20 +68,18 @@ app.use(express.logger(
 //    response.type("json");
 //    response.json(prepare(result));
 //});
-//
-//app.get("/stations", function(request, response) {
-//    var stmt = db.selectAll(schema.stations);
-//    when(db.execute(stmt)).then(
-//        function(result) {
-//            response.type("json");
-//            response.json(prepare(result.rows));
-//        },
-//        function(error) {
-//            response.type("json");
-//            response.json(prepare(error.message));
-//        });
-//});
-//
+
+app.get("/data/stations", function(req, res) {
+    var stmt = db.selectAll(schema.stations);
+    when(db.execute(stmt)).then(
+        function(result) {
+            // prepareLastModified(res, new Date("????-??-?? ??:??:??Z"));
+            res.set("Content-Type", "application/json");
+            res.send(JSON.stringify(result.rows));
+        },
+        handleUnexpected.bind(null, res));
+});
+
 //app.get("/stations/geo", function(request, response) {
 //    var stmt = db.selectAll(schema.stations);
 //    when(db.execute(stmt)).then(
