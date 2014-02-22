@@ -388,6 +388,42 @@ app.get("/data/:type/current", function(req, res) {
     }
 });
 
+app.get("/data/:type/:year/:month", function(req, res) {
+    try {
+        var sampleType = req.params.type;
+        var parts = parseDateParts(req.params.year, req.params.month).filter(_.isFinite);
+        if (!isValid(sampleType) || isNaN(parts[0]) || isNaN(parts[1])) {
+            return res.send(400);
+        }
+        var constraints = {date: {current: false, parts: parts, zone: "+09:00"}};
+        if (sampleType !== "wind") {
+            constraints.sampleType = sampleType;
+        }
+        query(res, constraints);
+    }
+    catch (error) {
+        handleUnexpected(res, error);
+    }
+});
+
+app.get("/data/:type/:year/:month/:day", function(req, res) {
+    try {
+        var sampleType = req.params.type;
+        var parts = parseDateParts(req.params.year, req.params.month, req.params.day).filter(_.isFinite);
+        if (!isValid(sampleType) || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+            return res.send(400);
+        }
+        var constraints = {date: {current: false, parts: parts, zone: "+09:00"}};
+        if (sampleType !== "wind") {
+            constraints.sampleType = sampleType;
+        }
+        query(res, constraints);
+    }
+    catch (error) {
+        handleUnexpected(res, error);
+    }
+});
+
 app.get("/data/:type/:year/:month/:day/:hour", function(req, res) {
     try {
         var sampleType = req.params.type;
