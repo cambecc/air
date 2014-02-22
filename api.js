@@ -35,6 +35,9 @@ var log = tool.log();
 
 var port = process.argv[2];
 var validSampleTypes = schema.samples.columns.map(function(column) { return column.name; });
+var validOverlays = _.reject(validSampleTypes, function(s) {
+    return s === "date" || s === "stationId" || s === "wv" || s === "wd";
+});
 
 // Cache index.html to serve it out. Changes require a restart to pick them up. Need to find a better way to do this.
 var indexHTML = "./public/index.html";
@@ -272,14 +275,17 @@ function buildResponse(sampleType, rows) {
     rows.rows.forEach(function(row) {
         var wd = asNullOrNumber(row.wd);
         var wv = asNullOrNumber(row.wv);
-        var datum = sampleType ? asNullOrNumber(row[sampleType]) : null;
+        var keys = sampleType ? sampleType === "all" ? validOverlays : [sampleType] : [];
+        var data = keys.map(function(key) {
+            return {overlay: key, value: asNullOrNumber(row[key])};
+        });
 
         if (row.stationId == 208) {
             wd = wv = null;  // this station appears to have bogus wind readings
         }
 
         // skip rows that have no data
-        if (!(_.isFinite(wd) && _.isFinite(wv)) && !_.isFinite(datum)) {
+        if (!(_.isFinite(wd) && _.isFinite(wv)) && data.filter(_.isFinite).length === 0) {
             return;
         }
 
@@ -288,9 +294,9 @@ function buildResponse(sampleType, rows) {
             coordinates: [asNullOrNumber(row.longitude), asNullOrNumber(row.latitude)],
             wind: [wd, wv]
         };
-        if (sampleType) {
-            sample[sampleType] = datum;
-        }
+        data.forEach(function(datum) {
+            sample[datum.overlay] = datum.value;
+        });
 
         var date = row.date + ":00";
         var bucket = buckets[date];
@@ -313,7 +319,7 @@ function doQuery(constraints) {
     var columns = ["date", "stationId", "longitude", "latitude", "wv", "wd"];
     var sampleType = constraints.sampleType;
     if (sampleType) {
-        columns.push(sampleType);
+        columns = columns.concat(sampleType === "all" ? validOverlays : [sampleType]);
     }
     var stmt = db.selectSamplesCompact(constraints, columns);
     return db.execute(stmt).then(buildResponse.bind(null, sampleType));
@@ -361,6 +367,7 @@ function query(res, constraints) {
 
 function isValid(sampleType) {
     return sampleType === "wind" ||
+        sampleType === "all" ||
         sampleType !== "stationId" && sampleType !== "date" && _.contains(validSampleTypes, sampleType);
 }
 

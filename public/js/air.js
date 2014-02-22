@@ -74,7 +74,7 @@
         var settings = {
             projection: projection,
             displayBounds: bounds,
-            particleCount: Math.round(bounds.height / 0.14),
+            particleCount: Math.round(bounds.height / 0.24),
             maxParticleAge: 40,  // max number of frames a particle is drawn before regeneration
             velocityScale: +(bounds.height / 700).toFixed(3),  // particle speed as number of pixels per unit vector
             fieldMaskWidth: isFF ? 2 : Math.ceil(bounds.height * 0.06),  // Wide strokes on FF are very slow
@@ -83,7 +83,7 @@
             animate: true,
             styles: styles,
             styleIndex: function(m) {  // map wind speed to a style
-                return Math.floor(Math.min(m, 17) / 17 * (styles.length - 1));
+                return Math.floor(Math.min(m, 10) / 10 * (styles.length - 1));
             }
         };
         log.debug(JSON.stringify(view) + " " + JSON.stringify(settings));
@@ -702,7 +702,7 @@
         }
 
         var g = d3.select(FIELD_CANVAS_ID).node().getContext("2d");
-        g.lineWidth = 0.75;
+        g.lineWidth = 1.0;
         g.fillStyle = settings.fadeFillStyle;
 
         function draw() {
@@ -804,7 +804,7 @@
                         // Map to logarithmic range [1, 101] then back to [0, 1]. Seems legit.
                         z = Math.log(z * 100 + 1) / LN101;
                     }
-                    g.fillStyle = asRainbowColorStyle(z, 0.6);
+                    g.fillStyle = asRainbowColorStyle(z, 0.4);
                     g.fillRect(x, y, 2, 2);
                 }
             }
