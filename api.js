@@ -34,6 +34,8 @@ var tool = require("./tool");
 var log = tool.log();
 
 var port = process.argv[2];
+var ruleFile = process.argv[5];
+
 var validSampleTypes = schema.samples.columns.map(function(column) { return column.name; });
 var validOverlays = _.reject(validSampleTypes, function(s) {
     return s === "date" || s === "stationId" || s === "wv" || s === "wd";
@@ -47,6 +49,7 @@ var indexHTMLDate = fs.statSync(indexHTML).mtime;
 var app = express();
 
 app.use(cacheControl());
+app.use(cors());
 app.use(express.compress({filter: compressionFilter}));
 
 express.logger.token("date", function() {
@@ -547,6 +550,30 @@ function cacheControl() {
         prepareCacheControl(res, maxAge);
         return next();
     };
+}
+
+function readJsonSync(path) {
+    return JSON.parse(fs.readFileSync(path, {encoding: "utf8"}));
+}
+
+function cors() {
+
+    var rules = [];
+    if (fs.existsSync(ruleFile)) {
+        rules = readJsonSync(ruleFile).map(function(entry) {
+            return new RegExp(entry);
+        });
+    }
+
+    return function(req, res, next) {
+        for (var i = 0; i < rules.length; i++) {
+            if (rules[i].test(req.headers.origin)) {
+                res.header("Access-Control-Allow-Origin", req.headers.origin);
+                break;
+            }
+        }
+        return next();
+    }
 }
 
 app.listen(port);
